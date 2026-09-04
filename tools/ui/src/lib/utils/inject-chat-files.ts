@@ -1,9 +1,11 @@
 import { AttachmentType, MessageRole } from '$lib/enums';
+import { ChatUploadsService } from '$lib/services/chat-uploads.service';
 import type { DatabaseMessage, DatabaseMessageExtra } from '$lib/types/database';
 
 /**
- * Open WebUI-style file object injected into tool arguments so MCP tools
- * (e.g. thaiocr) can read chat attachments the model did not pass itself.
+ * File object injected into tool arguments so MCP tools can read chat
+ * attachments the model did not pass itself. Prefer a server filesystem
+ * path; fall back to a data URI if the upload fails.
  */
 export interface ChatFileInjection {
 	id: string;
@@ -13,6 +15,7 @@ export interface ChatFileInjection {
 	url: string;
 	data: string;
 	base64: string;
+	path?: string;
 }
 
 function mimeFromDataUrl(url: string): string | undefined {
@@ -27,40 +30,69 @@ function stripDataUrl(payload: string): string {
 	return comma >= 0 ? payload.slice(comma + 1) : payload;
 }
 
-export function extrasToChatFiles(extras: DatabaseMessageExtra[]): ChatFileInjection[] {
+function injectionFromPayload(
+	name: string,
+	mimeType: string,
+	type: 'image' | 'file',
+	payload: string,
+	path?: string
+): ChatFileInjection {
+	const url = path ?? payload;
+
+	return {
+		base64: url,
+		data: path ?? stripDataUrl(payload),
+		id: path ?? name,
+		mimeType,
+		name,
+		path,
+		type,
+		url
+	};
+}
+
+async function uploadOrDataUri(
+	name: string,
+	mimeType: string,
+	type: 'image' | 'file',
+	payload: string
+): Promise<ChatFileInjection> {
+	const raw = stripDataUrl(payload);
+
+	try {
+		const uploaded = await ChatUploadsService.upload(name, mimeType, raw);
+
+		return injectionFromPayload(name, mimeType, type, payload, uploaded.path);
+	} catch (error) {
+		console.warn(`[chat-files] upload failed for ${name}, using data URI:`, error);
+
+		return injectionFromPayload(name, mimeType, type, payload);
+	}
+}
+
+export async function extrasToChatFiles(extras: DatabaseMessageExtra[]): Promise<ChatFileInjection[]> {
 	const files: ChatFileInjection[] = [];
 
 	for (const extra of extras) {
 		if (extra.type === AttachmentType.IMAGE && extra.base64Url) {
-			const url = extra.base64Url;
-			const data = stripDataUrl(url);
-
-			files.push({
-				base64: url,
-				data,
-				id: extra.name,
-				mimeType: mimeFromDataUrl(url) || 'image/png',
-				name: extra.name,
-				type: 'image',
-				url
-			});
+			files.push(
+				await uploadOrDataUri(
+					extra.name,
+					mimeFromDataUrl(extra.base64Url) || 'image/png',
+					'image',
+					extra.base64Url
+				)
+			);
 			continue;
 		}
 
 		if (extra.type === AttachmentType.PDF && extra.base64Data) {
-			const data = extra.base64Data;
 			const mime = 'application/pdf';
-			const url = `data:${mime};base64,${data}`;
+			const payload = extra.base64Data.startsWith('data:')
+				? extra.base64Data
+				: `data:${mime};base64,${extra.base64Data}`;
 
-			files.push({
-				base64: url,
-				data,
-				id: extra.name,
-				mimeType: 'application/pdf',
-				name: extra.name,
-				type: 'file',
-				url
-			});
+			files.push(await uploadOrDataUri(extra.name, mime, 'file', payload));
 		}
 	}
 
@@ -94,15 +126,15 @@ function isBlank(value: unknown): boolean {
 }
 
 /**
- * Inject `__files__`, `__file__`, and `__image__` (Open WebUI extra params)
- * into tool-call arguments. Does not overwrite values the model already set.
- * Also fills empty `image` / `file_id` so file-input tools receive a data URI.
+ * Inject `__files__`, `__file__`, and `__image__` into tool-call arguments.
+ * Uploads attachments to the server first so tools receive a filesystem path
+ * instead of a data URI. Does not overwrite values the model already set.
  */
-export function injectChatFilesIntoToolArgs(
+export async function injectChatFilesIntoToolArgs(
 	args: Record<string, unknown>,
 	extras: DatabaseMessageExtra[]
-): Record<string, unknown> {
-	const files = extrasToChatFiles(extras);
+): Promise<Record<string, unknown>> {
+	const files = await extrasToChatFiles(extras);
 
 	if (files.length === 0) {
 		return args;
@@ -111,6 +143,7 @@ export function injectChatFilesIntoToolArgs(
 	const firstImage = files.find((file) => file.type === 'image');
 	const firstFile = files.find((file) => file.type === 'file') ?? files[0];
 	const out: Record<string, unknown> = { ...args };
+	const toolPath = firstFile.path ?? firstFile.url;
 
 	if (out.__files__ === undefined) {
 		out.__files__ = files;
@@ -121,15 +154,23 @@ export function injectChatFilesIntoToolArgs(
 	}
 
 	if (out.__image__ === undefined && firstImage) {
-		out.__image__ = firstImage.url;
+		out.__image__ = firstImage.path ?? firstImage.url;
 	}
 
 	if (isBlank(out.image)) {
-		out.image = firstImage?.url ?? firstFile.url;
+		out.image = firstImage?.path ?? firstImage?.url ?? toolPath;
 	}
 
 	if (isBlank(out.file_id)) {
-		out.file_id = firstFile.id;
+		out.file_id = firstFile.path ?? firstFile.id;
+	}
+
+	if (isBlank(out.file)) {
+		out.file = toolPath;
+	}
+
+	if (isBlank(out.path)) {
+		out.path = toolPath;
 	}
 
 	return out;

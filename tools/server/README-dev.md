@@ -184,6 +184,30 @@ For detailed instructions, see the [test documentation](./tests/README.md).
 
 This endpoint is intended to be used internally by the Web UI and subject to change or to be removed in the future.
 
+**POST /uploads**
+
+Write a chat attachment to a temporary file on the server so MCP / server tools can open a real path instead of a base64 payload.
+
+Request body (JSON):
+
+```json
+{ "name": "doc.pdf", "mime_type": "application/pdf", "data": "<base64>" }
+```
+
+`data` may be a raw base64 string or a `data:` URL. Multipart form uploads are also accepted.
+
+Response:
+
+```json
+{ "id": "...", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/...", "mime_type": "application/pdf", "size": 1234 }
+```
+
+Files live under the process temp dir (`llama-server-uploads`), max 64 MiB, and are pruned after 24 hours.
+
+**DELETE /uploads/:id**
+
+Remove a previously uploaded file.
+
 **GET /tools**
 
 Get a list of tools, each tool has these fields:

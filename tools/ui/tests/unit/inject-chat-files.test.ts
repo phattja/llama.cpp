@@ -1,31 +1,51 @@
 import { AttachmentType, MessageRole } from '$lib/enums';
+import { ChatUploadsService } from '$lib/services/chat-uploads.service';
 import type { DatabaseMessageExtra } from '$lib/types/database';
 import {
 	collectLastUserMessageExtras,
 	extrasToChatFiles,
 	injectChatFilesIntoToolArgs
 } from '$lib/utils/inject-chat-files';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const pngDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
 const pdfMime = 'application/pdf';
 const pdfDataUrl = `data:${pdfMime};base64,JVBERi0=`;
+const pngPath = '/tmp/llama-server-uploads/id1_scan.png';
+const pdfPath = '/tmp/llama-server-uploads/id2_doc.pdf';
+
+vi.mock('$lib/services/chat-uploads.service', () => ({
+	ChatUploadsService: {
+		upload: vi.fn()
+	}
+}));
 
 describe('injectChatFilesIntoToolArgs', () => {
-	it('injects __files__, __file__, __image__, image, and file_id for a PNG', () => {
+	beforeEach(() => {
+		vi.mocked(ChatUploadsService.upload).mockImplementation(async (name) => {
+			const path = name.endsWith('.pdf') ? pdfPath : pngPath;
+
+			return { id: 'id', mimeType: 'application/octet-stream', name, path, size: 8 };
+		});
+	});
+
+	it('injects __files__, __file__, __image__, image, and file_id for a PNG using a server path', async () => {
 		const extras: DatabaseMessageExtra[] = [
 			{ base64Url: pngDataUrl, name: 'scan.png', type: AttachmentType.IMAGE }
 		];
-		const out = injectChatFilesIntoToolArgs({}, extras);
+		const out = await injectChatFilesIntoToolArgs({}, extras);
 
-		expect(out.__image__).toBe(pngDataUrl);
-		expect(out.image).toBe(pngDataUrl);
-		expect(out.file_id).toBe('scan.png');
-		expect(out.__file__).toMatchObject({ name: 'scan.png', type: 'image', url: pngDataUrl });
+		expect(out.__image__).toBe(pngPath);
+		expect(out.image).toBe(pngPath);
+		expect(out.file_id).toBe(pngPath);
+		expect(out.file).toBe(pngPath);
+		expect(out.path).toBe(pngPath);
+		expect(out.__file__).toMatchObject({ name: 'scan.png', path: pngPath, type: 'image', url: pngPath });
 		expect(out.__files__).toHaveLength(1);
+		expect(ChatUploadsService.upload).toHaveBeenCalled();
 	});
 
-	it('injects a PDF as type file with a data URI', () => {
+	it('injects a PDF as type file with a server path', async () => {
 		const extras: DatabaseMessageExtra[] = [
 			{
 				base64Data: 'JVBERi0=',
@@ -35,38 +55,51 @@ describe('injectChatFilesIntoToolArgs', () => {
 				type: AttachmentType.PDF
 			}
 		];
-		const out = injectChatFilesIntoToolArgs({ task: 'v1.5' }, extras);
+		const out = await injectChatFilesIntoToolArgs({ task: 'v1.5' }, extras);
 
-		expect(out.image).toBe('data:application/pdf;base64,JVBERi0=');
+		expect(out.image).toBe(pdfPath);
 		expect(out.__file__).toMatchObject({
 			mimeType: 'application/pdf',
 			name: 'doc.pdf',
+			path: pdfPath,
 			type: 'file',
-			url: pdfDataUrl
+			url: pdfPath
 		});
 		expect(out.task).toBe('v1.5');
 	});
 
-	it('does not overwrite image or __files__ the model already set', () => {
+	it('does not overwrite image or __files__ the model already set', async () => {
 		const extras: DatabaseMessageExtra[] = [
 			{ base64Url: pngDataUrl, name: 'scan.png', type: AttachmentType.IMAGE }
 		];
-		const out = injectChatFilesIntoToolArgs(
+		const out = await injectChatFilesIntoToolArgs(
 			{ __files__: ['keep'], image: '/tmp/explicit.png' },
 			extras
 		);
 
 		expect(out.image).toBe('/tmp/explicit.png');
 		expect(out.__files__).toEqual(['keep']);
-		expect(out.__image__).toBe(pngDataUrl);
+		expect(out.__image__).toBe(pngPath);
 	});
 
-	it('returns args unchanged when there are no file extras', () => {
+	it('returns args unchanged when there are no file extras', async () => {
 		const extras: DatabaseMessageExtra[] = [
 			{ content: 'hello', name: 'notes.txt', type: AttachmentType.TEXT }
 		];
 
-		expect(injectChatFilesIntoToolArgs({ page: '1' }, extras)).toEqual({ page: '1' });
+		expect(await injectChatFilesIntoToolArgs({ page: '1' }, extras)).toEqual({ page: '1' });
+	});
+
+	it('falls back to a data URI when upload fails', async () => {
+		vi.mocked(ChatUploadsService.upload).mockRejectedValueOnce(new Error('offline'));
+
+		const extras: DatabaseMessageExtra[] = [
+			{ base64Url: pngDataUrl, name: 'scan.png', type: AttachmentType.IMAGE }
+		];
+		const out = await injectChatFilesIntoToolArgs({}, extras);
+
+		expect(out.image).toBe(pngDataUrl);
+		expect(out.__file__).toMatchObject({ name: 'scan.png', url: pngDataUrl });
 	});
 });
 
@@ -98,8 +131,8 @@ describe('collectLastUserMessageExtras', () => {
 });
 
 describe('extrasToChatFiles', () => {
-	it('maps image and pdf extras and skips text', () => {
-		const files = extrasToChatFiles([
+	it('maps image and pdf extras and skips text', async () => {
+		const files = await extrasToChatFiles([
 			{ base64Url: pngDataUrl, name: 'a.png', type: AttachmentType.IMAGE },
 			{ content: 'x', name: 'a.txt', type: AttachmentType.TEXT },
 			{
@@ -112,6 +145,7 @@ describe('extrasToChatFiles', () => {
 		]);
 
 		expect(files.map((f) => f.type)).toEqual(['image', 'file']);
-		expect(files[1].url).toBe(pdfDataUrl);
+		expect(files[1].url).toBe(pdfPath);
+		expect(files[1].path).toBe(pdfPath);
 	});
 });

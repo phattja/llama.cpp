@@ -4,6 +4,7 @@
 #include "server-cors-proxy.h"
 #include "server-stream.h"
 #include "server-tools.h"
+#include "server-uploads.h"
 
 #include "arg.h"
 #include "build-info.h"
@@ -195,6 +196,7 @@ int llama_server(common_params & params, int argc, char ** argv) {
     server_child child; // only used in non-router mode
     server_routes routes(params, ctx_server);
     server_tools tools;
+    server_uploads uploads;
 
     std::optional<server_models_routes> models_routes{};
     if (is_router_server) {
@@ -332,6 +334,9 @@ int llama_server(common_params & params, int argc, char ** argv) {
     if (is_router_server) {
         warn_names.push_back("router mode");
     }
+
+    ctx_http.post("/uploads",      ex_wrapper(uploads.handle_post));
+    ctx_http.del ("/uploads/:id",  ex_wrapper(uploads.handle_delete));
 
     if (params.ui_mcp_proxy) {
         ctx_http.get ("/cors-proxy",      ex_wrapper(proxy_handler_get));

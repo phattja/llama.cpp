@@ -795,7 +795,7 @@ class AgenticStore {
 					toolSuccess = false;
 				} else {
 					try {
-						const args = injectChatFilesIntoToolArgs(
+						const args = await injectChatFilesIntoToolArgs(
 							this.parseToolArguments(toolCall.function.arguments),
 							chatFileExtras
 						);
