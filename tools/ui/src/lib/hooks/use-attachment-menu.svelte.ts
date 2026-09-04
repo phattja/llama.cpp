@@ -1,5 +1,7 @@
 import { page } from '$app/state';
-import { AttachmentAction } from '$lib/enums';
+import { SETTINGS_KEYS } from '$lib/constants';
+import { AttachmentAction, AttachmentItemEnabledWhen } from '$lib/enums';
+import { settingsStore } from '$lib/stores/settings/index.svelte';
 
 export interface AttachmentModalityFlags {
 	hasVisionModality: boolean;
@@ -50,6 +52,13 @@ export function useAttachmentMenu(
 
 	function isItemEnabled(enabledWhen: string | undefined): boolean {
 		if (!enabledWhen || enabledWhen === 'always') return true;
+
+		if (
+			enabledWhen === AttachmentItemEnabledWhen.HAS_VISION_MODALITY &&
+			settingsStore.config[SETTINGS_KEYS.ALLOW_IMAGE_ATTACH_NON_VISION] !== false
+		) {
+			return true;
+		}
 
 		return !!modalityFlags[enabledWhen as keyof AttachmentModalityFlags];
 	}

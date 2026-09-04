@@ -7,6 +7,8 @@
  * as reactive getters so validation tracks the model in real time.
  */
 
+import { SETTINGS_KEYS } from '$lib/constants';
+import { settingsStore } from '$lib/stores/settings/index.svelte';
 import { filterFilesByModalities, isFileTypeSupported } from '$lib/utils';
 import { processFilesToChatUploaded } from '$lib/utils/browser-only';
 
@@ -44,9 +46,12 @@ export function useChatScreenFileUpload(options: UseChatScreenFileUploadOptions)
 			}
 		}
 
+		const allowImagesWithoutVision =
+			settingsStore.config[SETTINGS_KEYS.ALLOW_IMAGE_ATTACH_NON_VISION] !== false;
 		const { modalityReasons, supportedFiles, unsupportedFiles } = filterFilesByModalities(
 			generallySupported,
-			options.capabilities()
+			options.capabilities(),
+			{ allowImagesWithoutVision }
 		);
 		const allUnsupportedFiles = [...generallyUnsupported, ...unsupportedFiles];
 
@@ -54,7 +59,7 @@ export function useChatScreenFileUpload(options: UseChatScreenFileUploadOptions)
 			const supportedTypes: string[] = ['text files', 'PDFs'];
 			const caps = options.capabilities();
 
-			if (caps.hasVision) supportedTypes.push('images');
+			if (caps.hasVision || allowImagesWithoutVision) supportedTypes.push('images');
 
 			if (caps.hasAudio) supportedTypes.push('audio files');
 

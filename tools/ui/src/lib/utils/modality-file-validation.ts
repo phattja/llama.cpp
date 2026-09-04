@@ -7,6 +7,11 @@ import { FileTypeCategory } from '$lib/enums';
 import type { ModalityCapabilities } from '$lib/types';
 import { getFileTypeCategory } from '$lib/utils';
 
+export interface FileModalityOptions {
+	/** When true, images may be attached for tools even without vision. */
+	allowImagesWithoutVision?: boolean;
+}
+
 /**
  * Check if a file type is supported by the given modalities
  * @param filename - The filename to check
@@ -17,7 +22,8 @@ import { getFileTypeCategory } from '$lib/utils';
 export function isFileTypeSupportedByModel(
 	filename: string,
 	mimeType: string | undefined,
-	capabilities: ModalityCapabilities
+	capabilities: ModalityCapabilities,
+	options: FileModalityOptions = {}
 ): boolean {
 	const category = mimeType ? getFileTypeCategory(mimeType) : null;
 
@@ -38,8 +44,7 @@ export function isFileTypeSupportedByModel(
 			return true;
 
 		case FileTypeCategory.IMAGE:
-			// Images require vision support
-			return capabilities.hasVision;
+			return capabilities.hasVision || !!options.allowImagesWithoutVision;
 
 		case FileTypeCategory.AUDIO:
 			// Audio files require audio support
@@ -63,7 +68,8 @@ export function isFileTypeSupportedByModel(
  */
 export function filterFilesByModalities(
 	files: File[],
-	capabilities: ModalityCapabilities
+	capabilities: ModalityCapabilities,
+	options: FileModalityOptions = {}
 ): {
 	supportedFiles: File[];
 	unsupportedFiles: File[];
@@ -73,6 +79,7 @@ export function filterFilesByModalities(
 	const unsupportedFiles: File[] = [];
 	const modalityReasons: Record<string, string> = {};
 	const { hasAudio, hasVideo, hasVision } = capabilities;
+	const allowImagesWithoutVision = !!options.allowImagesWithoutVision;
 
 	for (const file of files) {
 		const category = getFileTypeCategory(file.type);
@@ -82,7 +89,7 @@ export function filterFilesByModalities(
 
 		switch (category) {
 			case FileTypeCategory.IMAGE:
-				if (!hasVision) {
+				if (!hasVision && !allowImagesWithoutVision) {
 					isSupported = false;
 					reason = 'Images require a vision-capable model';
 				}
@@ -137,7 +144,8 @@ export function filterFilesByModalities(
 export function generateModalityErrorMessage(
 	unsupportedFiles: File[],
 	modalityReasons: Record<string, string>,
-	capabilities: ModalityCapabilities
+	capabilities: ModalityCapabilities,
+	options: FileModalityOptions = {}
 ): string {
 	if (unsupportedFiles.length === 0) return '';
 
@@ -159,7 +167,7 @@ export function generateModalityErrorMessage(
 	// Add helpful information about what is supported
 	const supportedTypes: string[] = ['text files', 'PDFs'];
 
-	if (hasVision) supportedTypes.push('images');
+	if (hasVision || options.allowImagesWithoutVision) supportedTypes.push('images');
 
 	if (hasAudio) supportedTypes.push('audio files');
 

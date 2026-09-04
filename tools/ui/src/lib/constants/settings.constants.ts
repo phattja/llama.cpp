@@ -244,6 +244,13 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.CHECKBOX
 			},
 			{
+				defaultValue: true,
+				help: 'Allow attaching images when the model cannot view them, so tools (OCR and other file-input tools) can still use the files. Images are not sent as picture input to non-vision models.',
+				key: SETTINGS_KEYS.ALLOW_IMAGE_ATTACH_NON_VISION,
+				label: 'Allow image attachments for non-vision models',
+				type: SettingsFieldType.CHECKBOX
+			},
+			{
 				defaultValue: 0,
 				help: 'Images larger than this will be resized before sending to server. Set to 0 to disable.',
 				key: SETTINGS_KEYS.MAX_IMAGE_RESOLUTION,

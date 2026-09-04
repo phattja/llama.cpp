@@ -10,7 +10,8 @@ export const ATTACHMENT_FILE_ITEMS: AttachmentMenuItem[] = [
 	{
 		action: AttachmentAction.FILE_UPLOAD,
 		class: 'images-button',
-		disabledTooltip: 'Image processing requires a vision model',
+		disabledTooltip:
+			'Images require a vision model, or enable "Allow image attachments for non-vision models" in Settings so tools can use the file',
 		enabledWhen: AttachmentItemEnabledWhen.HAS_VISION_MODALITY,
 		icon: FILE_TYPE_ICONS.image,
 		id: AttachmentMenuItemId.IMAGES,

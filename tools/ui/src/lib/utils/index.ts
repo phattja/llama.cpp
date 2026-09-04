@@ -135,7 +135,8 @@ export { maskInlineLaTeX, preprocessLaTeX } from './latex-protection';
 export {
 	isFileTypeSupportedByModel,
 	filterFilesByModalities,
-	generateModalityErrorMessage
+	generateModalityErrorMessage,
+	type FileModalityOptions
 } from './modality-file-validation';
 
 // Model name utilities
