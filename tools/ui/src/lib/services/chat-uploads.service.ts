@@ -1,4 +1,5 @@
-import { API_UPLOADS } from '$lib/constants';
+import { API_UPLOADS, SETTINGS_KEYS } from '$lib/constants';
+import { settingsStore } from '$lib/stores/settings/index.svelte';
 import { apiFetch } from '$lib/utils';
 
 export interface ChatUploadResult {
@@ -33,8 +34,18 @@ export class ChatUploadsService {
 			return cached;
 		}
 
+		const dir = String(settingsStore.config[SETTINGS_KEYS.ATTACHMENT_SERVER_DIR] ?? '').trim();
+		const ttlRaw = Number(settingsStore.config[SETTINGS_KEYS.ATTACHMENT_KEEP_HOURS]);
+		const ttl_hours = Number.isFinite(ttlRaw) ? ttlRaw : 24;
+
 		const response = await apiFetch<UploadResponse>(API_UPLOADS.CREATE, {
-			body: JSON.stringify({ data, mime_type: mimeType, name }),
+			body: JSON.stringify({
+				data,
+				mime_type: mimeType,
+				name,
+				ttl_hours,
+				...(dir ? { dir } : {})
+			}),
 			method: 'POST'
 		});
 

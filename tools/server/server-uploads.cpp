@@ -6,10 +6,21 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
+#include <ctime>
+#include <cstdlib>
 #include <fstream>
 #include <random>
 #include <sstream>
 #include <filesystem>
+
+#if defined(_WIN32)
+#    ifndef NOMINMAX
+#        define NOMINMAX
+#    endif
+#    include <windows.h>
+#else
+#    include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -44,6 +55,16 @@ static std::string sanitize_filename(std::string name) {
     return out;
 }
 
+static std::string sanitize_dirname(const std::string & name) {
+    if (name.empty() || name == "." || name == "..") {
+        throw std::invalid_argument("invalid folder name");
+    }
+    if (name.find('/') != std::string::npos || name.find('\\') != std::string::npos) {
+        throw std::invalid_argument("invalid folder name");
+    }
+    return sanitize_filename(name);
+}
+
 static std::string strip_data_url(const std::string & data) {
     const auto comma = data.find(',');
     if (data.rfind("data:", 0) == 0 && comma != std::string::npos) {
@@ -64,6 +85,56 @@ static bool valid_id(const std::string & id) {
     return true;
 }
 
+static fs::path weakly_abs(const std::string & path) {
+    std::error_code ec;
+    fs::path p(path);
+    if (p.empty()) {
+        throw std::invalid_argument("empty path");
+    }
+    auto canon = fs::weakly_canonical(p, ec);
+    if (ec) {
+        canon = fs::absolute(p, ec);
+    }
+    if (ec) {
+        throw std::invalid_argument("invalid path");
+    }
+    return canon;
+}
+
+static bool dir_is_writable(const fs::path & p) {
+    std::error_code ec;
+    if (!fs::is_directory(p, ec) || ec) {
+        return false;
+    }
+#if defined(_WIN32)
+    const auto probe = p / ".llama_wtest";
+    {
+        std::ofstream out(probe);
+        if (!out) {
+            return false;
+        }
+    }
+    fs::remove(probe, ec);
+    return true;
+#else
+    return ::access(p.string().c_str(), W_OK) == 0;
+#endif
+}
+
+static json read_meta(const fs::path & meta_path) {
+    std::ifstream in(meta_path);
+    if (!in) {
+        return json();
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    try {
+        return json::parse(ss.str());
+    } catch (...) {
+        return json();
+    }
+}
+
 std::string server_uploads::new_id() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
     std::uniform_int_distribution<uint64_t> dist;
@@ -72,38 +143,50 @@ std::string server_uploads::new_id() {
     return ss.str();
 }
 
-void server_uploads::ensure_dir() {
-    if (dir.empty()) {
-        dir = (fs::temp_directory_path() / "llama-server-uploads").string();
+void server_uploads::ensure_default_dir() {
+    if (default_dir.empty()) {
+        default_dir = (fs::temp_directory_path() / "llama-server-uploads").string();
     }
-    fs::create_directories(dir);
+    fs::create_directories(default_dir);
 }
 
-void server_uploads::prune_locked() {
-    const auto cutoff = fs::file_time_type::clock::now() - std::chrono::hours(ttl_hours);
-
+void server_uploads::prune_dir(const std::string & dir) {
     std::error_code ec;
-    for (auto it = files.begin(); it != files.end(); ) {
-        const auto ftime = fs::last_write_time(it->second.path, ec);
-        if (ec || ftime < cutoff) {
-            fs::remove(it->second.path, ec);
-            it = files.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    if (!fs::exists(dir)) {
+    if (!fs::exists(dir, ec) || ec) {
         return;
     }
+
+    const auto now = std::chrono::system_clock::now();
 
     for (const auto & p : fs::directory_iterator(dir, ec)) {
         if (ec || !p.is_regular_file()) {
             continue;
         }
-        const auto ftime = fs::last_write_time(p.path(), ec);
-        if (!ec && ftime < cutoff) {
-            fs::remove(p.path(), ec);
+        const auto path = p.path();
+        if (path.extension() != ".json") {
+            continue;
+        }
+        json meta = read_meta(path);
+        if (meta.is_null() || !meta.contains("ttl_hours") || !meta.contains("created")) {
+            continue;
+        }
+        const int ttl = json_value(meta, "ttl_hours", default_ttl_hours);
+        if (ttl <= 0) {
+            continue;
+        }
+        const int64_t created = json_value(meta, "created", (int64_t) 0);
+        const auto created_tp = std::chrono::system_clock::from_time_t((time_t) created);
+        if (now - created_tp < std::chrono::hours(ttl)) {
+            continue;
+        }
+        const std::string file_path = json_value(meta, "path", std::string());
+        if (!file_path.empty()) {
+            fs::remove(file_path, ec);
+        }
+        fs::remove(path, ec);
+        const std::string id = json_value(meta, "id", std::string());
+        if (!id.empty()) {
+            files.erase(id);
         }
     }
 }
@@ -112,11 +195,18 @@ server_uploads::server_uploads() {
     handle_post = [this](const server_http_req & req) -> server_http_res_ptr {
         auto res = std::make_unique<server_http_res>();
         try {
-            ensure_dir();
+            ensure_default_dir();
 
             std::string name;
             std::string mime_type = "application/octet-stream";
+            std::string dest_dir  = default_dir;
+            int ttl_hours         = default_ttl_hours;
             raw_buffer bytes;
+
+            json body = json::object();
+            if (!req.body.empty() && req.files.empty()) {
+                body = json::parse(req.body);
+            }
 
             if (!req.files.empty()) {
                 const auto & file = req.files.begin()->second;
@@ -125,8 +215,13 @@ server_uploads::server_uploads() {
                     mime_type = file.content_type;
                 }
                 bytes = file.data;
+                if (!req.body.empty()) {
+                    try {
+                        body = json::parse(req.body);
+                    } catch (...) {
+                    }
+                }
             } else {
-                json body = json::parse(req.body.empty() ? "{}" : req.body);
                 name = json_value(body, "name", std::string("file"));
                 mime_type = json_value(body, "mime_type", json_value(body, "mimeType", mime_type));
                 const std::string encoded = strip_data_url(json_value(body, "data", std::string()));
@@ -135,6 +230,15 @@ server_uploads::server_uploads() {
                 }
                 const std::string decoded = base64::decode(encoded);
                 bytes.assign(decoded.begin(), decoded.end());
+            }
+
+            const std::string dir_opt = json_value(body, "dir", std::string());
+            if (!dir_opt.empty()) {
+                dest_dir = weakly_abs(dir_opt).string();
+            }
+            ttl_hours = json_value(body, "ttl_hours", json_value(body, "ttlHours", ttl_hours));
+            if (ttl_hours < 0) {
+                throw std::invalid_argument("ttl_hours must be >= 0");
             }
 
             if (name.empty()) {
@@ -147,14 +251,20 @@ server_uploads::server_uploads() {
                 throw std::invalid_argument("file too large");
             }
 
+            fs::create_directories(dest_dir);
+            if (!dir_is_writable(dest_dir)) {
+                throw std::invalid_argument("directory is not writable");
+            }
+
             std::string id;
             std::string path;
+            const auto created = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             {
                 std::lock_guard<std::mutex> lock(mutex);
-                prune_locked();
+                prune_dir(dest_dir);
                 id = new_id();
-                path = (fs::path(dir) / (id + "_" + sanitize_filename(name))).string();
-                files[id] = entry{path, name, mime_type, bytes.size()};
+                path = (fs::path(dest_dir) / (id + "_" + sanitize_filename(name))).string();
+                files[id] = entry{path, name, mime_type, bytes.size(), ttl_hours};
             }
 
             std::ofstream out(path, std::ios::binary);
@@ -164,7 +274,19 @@ server_uploads::server_uploads() {
             out.write(reinterpret_cast<const char *>(bytes.data()), (std::streamsize) bytes.size());
             out.close();
 
-            SRV_INF("upload %s -> %s (%zu bytes)\n", name.c_str(), path.c_str(), bytes.size());
+            const fs::path meta_path = fs::path(dest_dir) / (id + ".json");
+            std::ofstream meta(meta_path);
+            meta << safe_json_to_str({
+                {"id",        id},
+                {"name",      name},
+                {"path",      path},
+                {"mime_type", mime_type},
+                {"size",      (int64_t) bytes.size()},
+                {"ttl_hours", ttl_hours},
+                {"created",   (int64_t) created},
+            });
+
+            SRV_INF("upload %s -> %s (%zu bytes, ttl=%d h)\n", name.c_str(), path.c_str(), bytes.size(), ttl_hours);
 
             res->data = safe_json_to_str({
                 {"id",        id},
@@ -172,6 +294,7 @@ server_uploads::server_uploads() {
                 {"path",      path},
                 {"mime_type", mime_type},
                 {"size",      (int64_t) bytes.size()},
+                {"ttl_hours", ttl_hours},
             });
         } catch (const std::invalid_argument & e) {
             res->status = 400;
@@ -193,21 +316,148 @@ server_uploads::server_uploads() {
             }
 
             std::string path;
+            std::string meta_path;
             {
                 std::lock_guard<std::mutex> lock(mutex);
                 auto it = files.find(id);
-                if (it == files.end()) {
-                    res->status = 404;
-                    res->data   = safe_json_to_str(format_error_response("upload not found", ERROR_TYPE_NOT_FOUND));
-                    return res;
+                if (it != files.end()) {
+                    path = it->second.path;
+                    meta_path = (fs::path(path).parent_path() / (id + ".json")).string();
+                    files.erase(it);
                 }
-                path = it->second.path;
-                files.erase(it);
+            }
+
+            if (path.empty()) {
+                res->status = 404;
+                res->data   = safe_json_to_str(format_error_response("upload not found", ERROR_TYPE_NOT_FOUND));
+                return res;
             }
 
             std::error_code ec;
             fs::remove(path, ec);
+            if (!meta_path.empty()) {
+                fs::remove(meta_path, ec);
+            }
             res->data = safe_json_to_str({{"ok", true}, {"id", id}});
+        } catch (const std::invalid_argument & e) {
+            res->status = 400;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+        } catch (const std::exception & e) {
+            res->status = 500;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_SERVER));
+        }
+        return res;
+    };
+
+    handle_list_dirs = [this](const server_http_req & req) -> server_http_res_ptr {
+        auto res = std::make_unique<server_http_res>();
+        try {
+            ensure_default_dir();
+            const std::string requested = req.get_param("path");
+
+            json entries = json::array();
+            std::string current;
+            std::string parent;
+            bool writable = false;
+
+            if (requested.empty()) {
+                current = "";
+                writable = false;
+                auto add_root = [&](const fs::path & p) {
+                    std::error_code ec;
+                    if (!fs::is_directory(p, ec) || ec || !dir_is_writable(p)) {
+                        return;
+                    }
+                    const std::string abs = weakly_abs(p.string()).string();
+                    entries.push_back(json{
+                        {"name", p.filename().string().empty() ? abs : p.filename().string()},
+                        {"path", abs},
+                        {"writable", true},
+                    });
+                };
+                add_root(fs::current_path());
+                add_root(fs::temp_directory_path());
+                add_root(fs::path(default_dir));
+#ifdef _WIN32
+                const char * home = std::getenv("USERPROFILE");
+#else
+                const char * home = std::getenv("HOME");
+#endif
+                if (home && home[0]) {
+                    add_root(fs::path(home));
+                }
+            } else {
+                const fs::path cur = weakly_abs(requested);
+                if (!fs::is_directory(cur)) {
+                    throw std::invalid_argument("not a directory");
+                }
+                current = cur.string();
+                writable = dir_is_writable(cur);
+                if (cur.has_parent_path() && cur.parent_path() != cur) {
+                    parent = cur.parent_path().string();
+                }
+                std::error_code ec;
+                for (const auto & p : fs::directory_iterator(cur, ec)) {
+                    if (ec || !p.is_directory()) {
+                        continue;
+                    }
+                    if (!dir_is_writable(p.path())) {
+                        continue;
+                    }
+                    entries.push_back(json{
+                        {"name", p.path().filename().string()},
+                        {"path", weakly_abs(p.path().string()).string()},
+                        {"writable", true},
+                    });
+                }
+            }
+
+            res->data = safe_json_to_str({
+                {"path",     current},
+                {"parent",   parent},
+                {"writable", writable},
+                {"entries",  entries},
+            });
+        } catch (const std::invalid_argument & e) {
+            res->status = 400;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+        } catch (const std::exception & e) {
+            res->status = 500;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_SERVER));
+        }
+        return res;
+    };
+
+    handle_mkdir = [this](const server_http_req & req) -> server_http_res_ptr {
+        auto res = std::make_unique<server_http_res>();
+        try {
+            json body = json::parse(req.body.empty() ? "{}" : req.body);
+            fs::path dest;
+            const std::string direct = json_value(body, "path", std::string());
+            if (!direct.empty()) {
+                dest = weakly_abs(direct);
+            } else {
+                const std::string parent = json_value(body, "parent", std::string());
+                const std::string name = sanitize_dirname(json_value(body, "name", std::string()));
+                if (parent.empty()) {
+                    throw std::invalid_argument("missing parent");
+                }
+                dest = weakly_abs(parent) / name;
+            }
+
+            const fs::path parent = dest.parent_path();
+            if (!dir_is_writable(parent)) {
+                throw std::invalid_argument("parent directory is not writable");
+            }
+            fs::create_directories(dest);
+            if (!dir_is_writable(dest)) {
+                throw std::runtime_error("created directory is not writable");
+            }
+
+            res->data = safe_json_to_str({
+                {"path",     dest.string()},
+                {"writable", true},
+            });
         } catch (const std::invalid_argument & e) {
             res->status = 400;
             res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));

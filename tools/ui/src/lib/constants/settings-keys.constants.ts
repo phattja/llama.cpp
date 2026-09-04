@@ -7,6 +7,8 @@
 export const SETTINGS_KEYS = {
 	AGENTIC_MAX_TURNS: 'agenticMaxTurns',
 	ALLOW_IMAGE_ATTACH_NON_VISION: 'allowImageAttachNonVision',
+	ATTACHMENT_KEEP_HOURS: 'attachmentKeepHours',
+	ATTACHMENT_SERVER_DIR: 'attachmentServerDir',
 	ALWAYS_SHOW_SIDEBAR_ON_DESKTOP: 'alwaysShowSidebarOnDesktop',
 	ALWAYS_SHOW_TOOL_CALL_CONTENT: 'alwaysShowToolCallContent',
 	API_KEY: 'apiKey',

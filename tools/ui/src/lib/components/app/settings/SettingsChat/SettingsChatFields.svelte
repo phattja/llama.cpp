@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { FlaskConical, RotateCcw } from '@lucide/svelte';
+	import { FlaskConical, FolderSearch, RotateCcw } from '@lucide/svelte';
+	import SettingsServerDirBrowse from '$lib/components/app/settings/SettingsServerDirBrowse.svelte';
 	import { SettingsChatParameterSourceIndicator } from '$lib/components/app/settings';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Input } from '$lib/components/ui/input';
@@ -21,6 +22,8 @@
 	}
 
 	let { fields, localConfig, onConfigChange, onThemeChange }: Props = $props();
+
+	let dirBrowseOpen = $state(false);
 
 	let currentModelParams = $derived.by(() => {
 		void modelsStore.props.cacheVersion;
@@ -79,7 +82,7 @@
 					{/if}
 				</div>
 
-				<div class="relative w-full">
+				<div class="relative flex w-full gap-2">
 					<Input
 						autocomplete={field.isPrivate ? 'new-password' : undefined}
 						id={field.key}
@@ -98,6 +101,22 @@
 							: (field.placeholder ?? '')}
 						value={currentValue}
 					/>
+
+					{#if field.key === SETTINGS_KEYS.ATTACHMENT_SERVER_DIR}
+						<button
+							class="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 text-sm hover:bg-muted"
+							onclick={() => (dirBrowseOpen = true)}
+							type="button"
+						>
+							<FolderSearch class="h-4 w-4" />
+							Browse
+						</button>
+						<SettingsServerDirBrowse
+							bind:open={dirBrowseOpen}
+							onSelect={(path) => onConfigChange(field.key, path)}
+							startPath={currentValue}
+						/>
+					{/if}
 
 					{#if isCustomRealTime}
 						<button

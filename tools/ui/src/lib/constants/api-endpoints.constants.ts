@@ -23,6 +23,7 @@ export const API_TOOLS = {
 
 export const API_UPLOADS = {
 	CREATE: '/uploads',
+	DIRS: '/uploads/dirs',
 	remove: (id: string) => `/uploads/${encodeURIComponent(id)}`
 };
 

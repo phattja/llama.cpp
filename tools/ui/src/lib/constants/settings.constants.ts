@@ -251,6 +251,23 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.CHECKBOX
 			},
 			{
+				defaultValue: '',
+				help: 'Folder on this llama-server host where attachments are stored for tool calls. Empty uses the server temp directory. Browse lists only directories the server can write.',
+				key: SETTINGS_KEYS.ATTACHMENT_SERVER_DIR,
+				label: 'Attachment folder on server',
+				placeholder: 'Server default (temp)',
+				type: SettingsFieldType.INPUT
+			},
+			{
+				defaultValue: 24,
+				help: 'Hours to keep uploaded attachment files on the server. 0 means never delete them.',
+				isPositiveInteger: true,
+				key: SETTINGS_KEYS.ATTACHMENT_KEEP_HOURS,
+				label: 'Keep attachments on server (hours)',
+				min: 0,
+				type: SettingsFieldType.INPUT
+			},
+			{
 				defaultValue: 0,
 				help: 'Images larger than this will be resized before sending to server. Set to 0 to disable.',
 				key: SETTINGS_KEYS.MAX_IMAGE_RESOLUTION,

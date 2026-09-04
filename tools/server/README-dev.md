@@ -191,18 +191,38 @@ Write a chat attachment to a temporary file on the server so MCP / server tools 
 Request body (JSON):
 
 ```json
-{ "name": "doc.pdf", "mime_type": "application/pdf", "data": "<base64>" }
+{
+  "name": "doc.pdf",
+  "mime_type": "application/pdf",
+  "data": "<base64>",
+  "dir": "/optional/writable/folder",
+  "ttl_hours": 24
+}
 ```
 
 `data` may be a raw base64 string or a `data:` URL. Multipart form uploads are also accepted.
+`dir` defaults to `$TMPDIR/llama-server-uploads`. The directory must be writable by the server.
+`ttl_hours` is how long the file is kept (default 24). `0` means never prune.
 
 Response:
 
 ```json
-{ "id": "...", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/...", "mime_type": "application/pdf", "size": 1234 }
+{ "id": "...", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/...", "mime_type": "application/pdf", "size": 1234, "ttl_hours": 24 }
 ```
 
-Files live under the process temp dir (`llama-server-uploads`), max 1 GiB, and are pruned after 24 hours.
+Max file size is 1 GiB.
+
+**GET /uploads/dirs?path=**
+
+List writable directories the server can use for attachments. Empty `path` returns roots (cwd, temp, home if writable). Otherwise lists writable subfolders of `path`.
+
+**POST /uploads/dirs**
+
+Create a subfolder:
+
+```json
+{ "parent": "/writable/folder", "name": "inbox" }
+```
 
 **DELETE /uploads/:id**
 
