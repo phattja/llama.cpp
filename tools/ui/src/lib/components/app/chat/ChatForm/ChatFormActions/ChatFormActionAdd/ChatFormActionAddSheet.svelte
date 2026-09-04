@@ -22,6 +22,8 @@
 	import { getChatFormActionsContext } from '$lib/contexts';
 	import { AttachmentAction } from '$lib/enums/attachment.enums';
 	import { useAttachmentMenu } from '$lib/hooks/use-attachment-menu.svelte';
+	import { ChatUploadsService } from '$lib/services/chat-uploads.service';
+	import type { ChatUploadedFile } from '$lib/types';
 	import { useReasoningMenu } from '$lib/hooks/use-reasoning-menu.svelte';
 	import { useToolsPanel } from '$lib/hooks/use-tools-panel.svelte';
 	import type { ToolGroup } from '$lib/types';
@@ -38,8 +40,45 @@
 
 	let sheetOpen = $state(false);
 	let filesExpanded = $state(true);
+	let attachedExpanded = $state(false);
 	let reasoningExpanded = $state(false);
 	let toolsExpanded = $state(false);
+	let serverFiles = $state<{ name: string; path: string; size: number }[]>([]);
+	let serverFilesLoading = $state(false);
+
+	function mimeFromFilename(name: string): string {
+		const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '';
+		if (ext === 'pdf') return 'application/pdf';
+		if (ext === 'png') return 'image/png';
+		if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+		if (ext === 'txt' || ext === 'md') return 'text/plain';
+		return 'application/octet-stream';
+	}
+
+	async function loadServerFiles() {
+		serverFilesLoading = true;
+		try {
+			serverFiles = await ChatUploadsService.listFiles();
+		} catch {
+			serverFiles = [];
+		} finally {
+			serverFilesLoading = false;
+		}
+	}
+
+	function attachServerFile(entry: { name: string; path: string; size: number }) {
+		const uploaded: ChatUploadedFile = {
+			file: new File([], entry.name, { type: mimeFromFilename(entry.name) }),
+			id: `server-${entry.path}`,
+			name: entry.name,
+			serverPath: entry.path,
+			size: entry.size,
+			type: mimeFromFilename(entry.name)
+		};
+
+		chatFormActions.onAttachServerFile?.(uploaded);
+		sheetOpen = false;
+	}
 
 	const attachmentMenu = useAttachmentMenu(
 		() => ({
@@ -182,6 +221,46 @@
 									</Tooltip.Root>
 								{/if}
 							{/each}
+						</div>
+					</Collapsible.Content>
+				</Collapsible.Root>
+
+				<Collapsible.Root
+					onOpenChange={(open) => {
+						attachedExpanded = open;
+						if (open) void loadServerFiles();
+					}}
+					open={attachedExpanded}
+				>
+					<Collapsible.Trigger class={sheetItemClass}>
+						{#if attachedExpanded}
+							<ChevronDown class="{ICON_CLASS_DEFAULT} shrink-0" />
+						{:else}
+							<ChevronRight class="{ICON_CLASS_DEFAULT} shrink-0" />
+						{/if}
+
+						<File class="{ICON_CLASS_DEFAULT} shrink-0" />
+
+						<span class="flex-1">Attached files</span>
+					</Collapsible.Trigger>
+
+					<Collapsible.Content>
+						<div class="flex flex-col gap-0.5 pl-4">
+							{#if serverFilesLoading}
+								<p class="px-3 py-2 text-sm text-muted-foreground">Loading…</p>
+							{:else if serverFiles.length === 0}
+								<p class="px-3 py-2 text-sm text-muted-foreground">No files in the attachment folder</p>
+							{:else}
+								{#each serverFiles as entry (entry.path)}
+									<button
+										class={sheetItemClass}
+										onclick={() => attachServerFile(entry)}
+										type="button"
+									>
+										<span class="truncate">{entry.name}</span>
+									</button>
+								{/each}
+							{/if}
 						</div>
 					</Collapsible.Content>
 				</Collapsible.Root>

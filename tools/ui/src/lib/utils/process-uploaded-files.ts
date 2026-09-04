@@ -3,6 +3,7 @@ import { convertPDFToText } from './pdf-processing';
 import { isSvgMimeType, svgBase64UrlToPngDataURL } from './svg-to-png';
 import { isWebpMimeType, webpBase64UrlToPngDataURL } from './webp-to-png';
 import { FileTypeCategory } from '$lib/enums';
+import { ChatUploadsService } from '$lib/services/chat-uploads.service';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import { getFileTypeCategory, getPdfParseMode } from '$lib/utils';
 
@@ -131,6 +132,27 @@ export async function processFilesToChatUploaded(
 		} catch (error) {
 			console.error('Error processing file', file.name, error);
 			results.push(base);
+		}
+	}
+
+	for (let i = 0; i < results.length; i++) {
+		const item = results[i];
+
+		if (!item.file.size || item.serverPath) {
+			continue;
+		}
+
+		try {
+			const dataUrl = await readFileAsDataURL(item.file);
+			const uploaded = await ChatUploadsService.upload(
+				item.name,
+				item.type || 'application/octet-stream',
+				dataUrl
+			);
+
+			results[i] = { ...item, serverPath: uploaded.path };
+		} catch (error) {
+			console.warn('Immediate server upload failed for', item.name, error);
 		}
 	}
 

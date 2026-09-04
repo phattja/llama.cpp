@@ -15,6 +15,7 @@
 	import { ChatService } from '$lib/services';
 	import { chatStore, conversationsStore, settingsStore } from '$lib/stores';
 	import { getFileTypeCategory } from '$lib/utils';
+	import type { ChatUploadedFile } from '$lib/types';
 
 	interface Props {
 		canSend?: boolean;
@@ -28,6 +29,7 @@
 		showModelSelector?: boolean;
 		uploadedFiles?: ChatUploadedFile[];
 		onFileUpload?: () => void;
+		onAttachServerFile?: (file: ChatUploadedFile) => void;
 		onMicClick?: () => void;
 		onStop?: () => void;
 		onSystemPromptClick?: () => void;
@@ -42,6 +44,7 @@
 		isLoading = false,
 		isReasoning = false,
 		isRecording = false,
+		onAttachServerFile,
 		onFileUpload,
 		onMcpSettingsClick,
 		onMicClick,
@@ -134,6 +137,9 @@
 		},
 		get onFileUpload() {
 			return onFileUpload;
+		},
+		get onAttachServerFile() {
+			return onAttachServerFile;
 		},
 		get onMcpSettingsClick() {
 			return onMcpSettingsClick;

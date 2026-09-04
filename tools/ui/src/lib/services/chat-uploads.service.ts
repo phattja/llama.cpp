@@ -61,4 +61,21 @@ export class ChatUploadsService {
 
 		return result;
 	}
+
+	static async listFiles(): Promise<{ name: string; path: string; size: number }[]> {
+		const dir = String(settingsStore.config[SETTINGS_KEYS.ATTACHMENT_SERVER_DIR] ?? '').trim();
+		const ttlRaw = Number(settingsStore.config[SETTINGS_KEYS.ATTACHMENT_KEEP_HOURS]);
+		const ttl_hours = Number.isFinite(ttlRaw) ? ttlRaw : 24;
+		const query = new URLSearchParams({ ttl_hours: String(ttl_hours) });
+
+		if (dir) {
+			query.set('path', dir);
+		}
+
+		const listing = await apiFetch<{ files?: { name: string; path: string; size: number }[] }>(
+			`${API_UPLOADS.DIRS}?${query.toString()}`
+		);
+
+		return listing.files ?? [];
+	}
 }

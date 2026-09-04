@@ -45,6 +45,7 @@ import { isAbortError } from '$lib/utils/abort';
 import { ApiError } from '$lib/utils/api-fetch';
 import { getAuthHeaders, getJsonHeaders } from '$lib/utils/api-headers';
 import { formatAttachmentText } from '$lib/utils/formatters';
+import { extrasToChatFiles, formatAttachedFilesForModel } from '$lib/utils/inject-chat-files';
 import { streamIdentity } from '$lib/utils/stream-identity';
 
 interface ResumableStreamState {
@@ -277,8 +278,9 @@ export class ChatService {
 					});
 				}
 			} else if (pdfFile.parsedAs === 'none' || !pdfFile.content) {
+				const loc = pdfFile.serverPath ? ` Path: ${pdfFile.serverPath}` : '';
 				contentParts.push({
-					text: `[PDF attached: ${pdfFile.name} — original file, not parsed. Use a file tool to read it.]`,
+					text: `[PDF attached: ${pdfFile.name} — original file, not parsed.${loc} Use a file tool with this path.]`,
 					type: ContentPartType.TEXT
 				});
 			} else {
@@ -302,6 +304,15 @@ export class ChatService {
 					mcpPrompt.content,
 					mcpPrompt.serverName
 				),
+				type: ContentPartType.TEXT
+			});
+		}
+
+		const attachedHint = formatAttachedFilesForModel(await extrasToChatFiles(message.extra));
+
+		if (attachedHint) {
+			contentParts.push({
+				text: attachedHint,
 				type: ContentPartType.TEXT
 			});
 		}

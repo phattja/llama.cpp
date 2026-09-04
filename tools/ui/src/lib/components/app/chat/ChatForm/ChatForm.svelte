@@ -337,6 +337,11 @@
 		fileInputRef?.click();
 	}
 
+	function handleAttachServerFile(file: ChatUploadedFile) {
+		uploadedFiles = [...uploadedFiles, file];
+		onUploadedFilesChange?.(uploadedFiles);
+	}
+
 	function handleFileRemove(fileId: string) {
 		if (fileId.startsWith('attachment-')) {
 			const index = parseInt(fileId.replace('attachment-', ''), 10);
@@ -888,6 +893,7 @@
 				{isLoading}
 				isReasoning={chatStore.isReasoning}
 				{isRecording}
+				onAttachServerFile={handleAttachServerFile}
 				onFileUpload={handleFileUpload}
 				onMcpSettingsClick={() => (isMcpServersDialogOpen = true)}
 				onMicClick={handleMicClick}

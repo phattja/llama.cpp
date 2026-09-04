@@ -202,12 +202,13 @@ Request body (JSON):
 
 `data` may be a raw base64 string or a `data:` URL. Multipart form uploads are also accepted.
 `dir` defaults to `$TMPDIR/llama-server-uploads`. The directory must be writable by the server.
-`ttl_hours` is how long the file is kept (default 24). `0` means never prune.
+The file is stored under its original name (unsafe path characters stripped). Existing files with the same name are overwritten.
+`ttl_hours` is how long files in that folder are kept (default 24), measured from each file's last-write timestamp. `0` means never prune. There is no sidecar metadata file.
 
 Response:
 
 ```json
-{ "id": "...", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/...", "mime_type": "application/pdf", "size": 1234, "ttl_hours": 24 }
+{ "id": "doc.pdf", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/doc.pdf", "mime_type": "application/pdf", "size": 1234, "ttl_hours": 24 }
 ```
 
 Max file size is 1 GiB.

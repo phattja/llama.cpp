@@ -35,6 +35,7 @@ export interface DatabaseMessageExtraAudioFile {
 	size?: number;
 	base64Data: string;
 	mimeType: string;
+	serverPath?: string;
 }
 
 export interface DatabaseMessageExtraVideoFile {
@@ -43,6 +44,7 @@ export interface DatabaseMessageExtraVideoFile {
 	size?: number;
 	base64Data: string;
 	mimeType: string;
+	serverPath?: string;
 }
 
 export interface DatabaseMessageExtraImageFile {
@@ -50,6 +52,7 @@ export interface DatabaseMessageExtraImageFile {
 	name: string;
 	size?: number;
 	base64Url: string;
+	serverPath?: string;
 }
 
 /**
@@ -73,6 +76,7 @@ export interface DatabaseMessageExtraPdfFile {
 	processedAsImages: boolean;
 	/** How this PDF was prepared. `none` keeps the original file for tools. */
 	parsedAs?: 'none' | 'text' | 'image';
+	serverPath?: string;
 }
 
 export interface DatabaseMessageExtraTextFile {
@@ -80,6 +84,7 @@ export interface DatabaseMessageExtraTextFile {
 	name: string;
 	size?: number;
 	content: string;
+	serverPath?: string;
 }
 
 export interface DatabaseMessageExtraMcpPrompt {

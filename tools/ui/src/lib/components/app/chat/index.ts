@@ -219,6 +219,7 @@ export { default as ChatFormActionModels } from './ChatForm/ChatFormActions/Chat
  * ```
  */
 export { default as ChatFormActionAddToolsSubmenu } from './ChatForm/ChatFormActions/ChatFormActionAdd/ChatFormActionAddToolsSubmenu.svelte';
+export { default as ChatFormActionAddAttachedFilesSubmenu } from './ChatForm/ChatFormActions/ChatFormActionAdd/ChatFormActionAddAttachedFilesSubmenu.svelte';
 
 /**
  * Dropdown submenu for selecting reasoning effort level.

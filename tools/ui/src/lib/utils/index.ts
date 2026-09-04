@@ -18,6 +18,7 @@ export { isTextFile, isImageFile, isPdfFile, isAudioFile, isVideoFile } from './
 export {
 	collectLastUserMessageExtras,
 	extrasToChatFiles,
+	formatAttachedFilesForModel,
 	injectChatFilesIntoToolArgs,
 	type ChatFileInjection
 } from './inject-chat-files';

@@ -70,33 +70,91 @@ async function uploadOrDataUri(
 	}
 }
 
+function extraServerPath(extra: DatabaseMessageExtra): string | undefined {
+	if ('serverPath' in extra && typeof extra.serverPath === 'string' && extra.serverPath.trim()) {
+		return extra.serverPath.trim();
+	}
+
+	return undefined;
+}
+
 export async function extrasToChatFiles(extras: DatabaseMessageExtra[]): Promise<ChatFileInjection[]> {
 	const files: ChatFileInjection[] = [];
 
 	for (const extra of extras) {
-		if (extra.type === AttachmentType.IMAGE && extra.base64Url) {
+		const existingPath = extraServerPath(extra);
+
+		if (extra.type === AttachmentType.IMAGE && (extra.base64Url || existingPath)) {
+			if (existingPath) {
+				files.push(
+					injectionFromPayload(
+						extra.name,
+						mimeFromDataUrl(extra.base64Url) || 'image/png',
+						'image',
+						extra.base64Url || existingPath,
+						existingPath
+					)
+				);
+			} else if (extra.base64Url) {
+				files.push(
+					await uploadOrDataUri(
+						extra.name,
+						mimeFromDataUrl(extra.base64Url) || 'image/png',
+						'image',
+						extra.base64Url
+					)
+				);
+			}
+			continue;
+		}
+
+		if (extra.type === AttachmentType.PDF && (extra.base64Data || existingPath)) {
+			const mime = 'application/pdf';
+			if (existingPath) {
+				files.push(injectionFromPayload(extra.name, mime, 'file', extra.base64Data || existingPath, existingPath));
+			} else if (extra.base64Data) {
+				const payload = extra.base64Data.startsWith('data:')
+					? extra.base64Data
+					: `data:${mime};base64,${extra.base64Data}`;
+
+				files.push(await uploadOrDataUri(extra.name, mime, 'file', payload));
+			}
+			continue;
+		}
+
+		if (
+			(extra.type === AttachmentType.AUDIO || extra.type === AttachmentType.VIDEO) &&
+			existingPath
+		) {
 			files.push(
-				await uploadOrDataUri(
-					extra.name,
-					mimeFromDataUrl(extra.base64Url) || 'image/png',
-					'image',
-					extra.base64Url
-				)
+				injectionFromPayload(extra.name, extra.mimeType, 'file', extra.base64Data || existingPath, existingPath)
 			);
 			continue;
 		}
 
-		if (extra.type === AttachmentType.PDF && extra.base64Data) {
-			const mime = 'application/pdf';
-			const payload = extra.base64Data.startsWith('data:')
-				? extra.base64Data
-				: `data:${mime};base64,${extra.base64Data}`;
-
-			files.push(await uploadOrDataUri(extra.name, mime, 'file', payload));
+		if (extra.type === AttachmentType.TEXT && existingPath) {
+			files.push(injectionFromPayload(extra.name, 'text/plain', 'file', extra.content, existingPath));
 		}
 	}
 
 	return files;
+}
+
+/** Text the model sees so it can pass attachment paths to tools instead of asking the user. */
+export function formatAttachedFilesForModel(files: ChatFileInjection[]): string {
+	if (files.length === 0) {
+		return '';
+	}
+
+	const lines = files.map((file) => {
+		const loc = file.path || file.url;
+		return `- ${file.name} (${file.mimeType}): ${loc}`;
+	});
+
+	return [
+		'[Attached files on this llama-server host. Pass these paths to file tools. Do not ask the user to re-upload or provide a path.]',
+		...lines
+	].join('\n');
 }
 
 /**

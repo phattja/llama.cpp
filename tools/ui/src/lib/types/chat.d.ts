@@ -48,6 +48,8 @@ export interface ChatUploadedFile {
 	};
 	isLoading?: boolean;
 	loadError?: string;
+	/** Absolute path on the llama-server host after immediate upload. */
+	serverPath?: string;
 }
 
 export interface ChatAttachmentDisplayItem {
@@ -334,6 +336,7 @@ export interface ChatFormActionsContext {
 	readonly hasVideoModality: boolean;
 	readonly hasVisionModality: boolean;
 	onFileUpload?: () => void;
+	onAttachServerFile?: (file: ChatUploadedFile) => void;
 	onSystemPromptClick?: () => void;
 	onMcpSettingsClick?: () => void;
 }

@@ -9,6 +9,81 @@ import type { ChatUploadedFile, DatabaseMessageExtra, FileProcessingResult } fro
 import { getFileTypeCategory, getPdfParseMode } from '$lib/utils';
 import { toast } from 'svelte-sonner';
 
+function withServerPath<T extends { serverPath?: string }>(extra: T, file: ChatUploadedFile): T {
+	if (file.serverPath) {
+		extra.serverPath = file.serverPath;
+	}
+
+	return extra;
+}
+
+function extraFromServerPath(file: ChatUploadedFile): DatabaseMessageExtra {
+	const category = getFileTypeCategory(file.type);
+
+	if (category === FileTypeCategory.IMAGE) {
+		return withServerPath(
+			{
+				base64Url: file.preview || '',
+				name: file.name,
+				size: file.size,
+				type: AttachmentType.IMAGE
+			},
+			file
+		);
+	}
+
+	if (category === FileTypeCategory.PDF) {
+		return withServerPath(
+			{
+				base64Data: '',
+				content: '',
+				name: file.name,
+				parsedAs: 'none',
+				processedAsImages: false,
+				size: file.size,
+				type: AttachmentType.PDF
+			},
+			file
+		);
+	}
+
+	if (category === FileTypeCategory.AUDIO) {
+		return withServerPath(
+			{
+				base64Data: '',
+				mimeType: file.type,
+				name: file.name,
+				size: file.size,
+				type: AttachmentType.AUDIO
+			},
+			file
+		);
+	}
+
+	if (category === FileTypeCategory.VIDEO) {
+		return withServerPath(
+			{
+				base64Data: '',
+				mimeType: file.type,
+				name: file.name,
+				size: file.size,
+				type: AttachmentType.VIDEO
+			},
+			file
+		);
+	}
+
+	return withServerPath(
+		{
+			content: file.textContent ?? '',
+			name: file.name,
+			size: file.size,
+			type: AttachmentType.TEXT
+		},
+		file
+	);
+}
+
 function readFileAsBase64(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
@@ -35,6 +110,11 @@ export async function parseFilesToMessageExtras(
 	const emptyFiles: string[] = [];
 
 	for (const file of files) {
+		if (file.serverPath && file.file.size === 0 && file.type !== SpecialFileType.MCP_PROMPT) {
+			extras.push(extraFromServerPath(file));
+			continue;
+		}
+
 		if (file.type === SpecialFileType.MCP_PROMPT && file.mcpPrompt) {
 			extras.push({
 				arguments: file.mcpPrompt.arguments,
@@ -67,25 +147,35 @@ export async function parseFilesToMessageExtras(
 					}
 				}
 
-				extras.push({
-					base64Url,
-					name: file.name,
-					size: file.size,
-					type: AttachmentType.IMAGE
-				});
+				extras.push(
+					withServerPath(
+						{
+							base64Url,
+							name: file.name,
+							size: file.size,
+							type: AttachmentType.IMAGE
+						},
+						file
+					)
+				);
 			}
 		} else if (getFileTypeCategory(file.type) === FileTypeCategory.AUDIO) {
 			// Process audio files (MP3 and WAV)
 			try {
 				const base64Data = await readFileAsBase64(file.file);
 
-				extras.push({
-					base64Data: base64Data,
-					mimeType: file.type,
-					name: file.name,
-					size: file.size,
-					type: AttachmentType.AUDIO
-				});
+				extras.push(
+					withServerPath(
+						{
+							base64Data: base64Data,
+							mimeType: file.type,
+							name: file.name,
+							size: file.size,
+							type: AttachmentType.AUDIO
+						},
+						file
+					)
+				);
 			} catch (error) {
 				console.error(`Failed to process audio file ${file.name}:`, error);
 			}
@@ -94,13 +184,18 @@ export async function parseFilesToMessageExtras(
 			try {
 				const base64Data = await readFileAsBase64(file.file);
 
-				extras.push({
-					base64Data: base64Data,
-					mimeType: file.type,
-					name: file.name,
-					size: file.size,
-					type: AttachmentType.VIDEO
-				});
+				extras.push(
+					withServerPath(
+						{
+							base64Data: base64Data,
+							mimeType: file.type,
+							name: file.name,
+							size: file.size,
+							type: AttachmentType.VIDEO
+						},
+						file
+					)
+				);
 			} catch (error) {
 				console.error(`Failed to process video file ${file.name}:`, error);
 			}
@@ -131,16 +226,21 @@ export async function parseFilesToMessageExtras(
 							}
 						);
 
-						extras.push({
-							base64Data: base64Data,
-							content: `PDF file with ${images.length} pages`,
-							images: images,
-							name: file.name,
-							parsedAs: 'image',
-							processedAsImages: true,
-							size: file.size,
-							type: AttachmentType.PDF
-						});
+						extras.push(
+							withServerPath(
+								{
+									base64Data: base64Data,
+									content: `PDF file with ${images.length} pages`,
+									images: images,
+									name: file.name,
+									parsedAs: 'image',
+									processedAsImages: true,
+									size: file.size,
+									type: AttachmentType.PDF
+								},
+								file
+							)
+						);
 					} catch (imageError) {
 						console.warn(
 							`Failed to process PDF ${file.name} as images, keeping original file:`,
@@ -151,15 +251,20 @@ export async function parseFilesToMessageExtras(
 							duration: 4000
 						});
 
-						extras.push({
-							base64Data: base64Data,
-							content: '',
-							name: file.name,
-							parsedAs: 'none',
-							processedAsImages: false,
-							size: file.size,
-							type: AttachmentType.PDF
-						});
+						extras.push(
+							withServerPath(
+								{
+									base64Data: base64Data,
+									content: '',
+									name: file.name,
+									parsedAs: 'none',
+									processedAsImages: false,
+									size: file.size,
+									type: AttachmentType.PDF
+								},
+								file
+							)
+						);
 					}
 				} else if (parseMode === 'text') {
 					const content = await convertPDFToText(file.file);
@@ -168,25 +273,35 @@ export async function parseFilesToMessageExtras(
 						duration: 3000
 					});
 
-					extras.push({
-						base64Data: base64Data,
-						content: content,
-						name: file.name,
-						parsedAs: 'text',
-						processedAsImages: false,
-						size: file.size,
-						type: AttachmentType.PDF
-					});
+					extras.push(
+						withServerPath(
+							{
+								base64Data: base64Data,
+								content: content,
+								name: file.name,
+								parsedAs: 'text',
+								processedAsImages: false,
+								size: file.size,
+								type: AttachmentType.PDF
+							},
+							file
+						)
+					);
 				} else {
-					extras.push({
-						base64Data: base64Data,
-						content: '',
-						name: file.name,
-						parsedAs: 'none',
-						processedAsImages: false,
-						size: file.size,
-						type: AttachmentType.PDF
-					});
+					extras.push(
+						withServerPath(
+							{
+								base64Data: base64Data,
+								content: '',
+								name: file.name,
+								parsedAs: 'none',
+								processedAsImages: false,
+								size: file.size,
+								type: AttachmentType.PDF
+							},
+							file
+						)
+					);
 				}
 			} catch (error) {
 				console.error(`Failed to process PDF file ${file.name}:`, error);
@@ -200,12 +315,17 @@ export async function parseFilesToMessageExtras(
 					console.warn(`File ${file.name} is empty and will be skipped`);
 					emptyFiles.push(file.name);
 				} else if (isLikelyTextFile(content)) {
-					extras.push({
-						content: content,
-						name: file.name,
-						size: file.size,
-						type: AttachmentType.TEXT
-					});
+					extras.push(
+						withServerPath(
+							{
+								content: content,
+								name: file.name,
+								size: file.size,
+								type: AttachmentType.TEXT
+							},
+							file
+						)
+					);
 				} else {
 					console.warn(`File ${file.name} appears to be binary and will be skipped`);
 				}

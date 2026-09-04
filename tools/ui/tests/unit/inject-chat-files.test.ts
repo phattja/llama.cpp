@@ -4,6 +4,7 @@ import type { DatabaseMessageExtra } from '$lib/types/database';
 import {
 	collectLastUserMessageExtras,
 	extrasToChatFiles,
+	formatAttachedFilesForModel,
 	injectChatFilesIntoToolArgs
 } from '$lib/utils/inject-chat-files';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -101,6 +102,26 @@ describe('injectChatFilesIntoToolArgs', () => {
 		expect(out.image).toBe(pngDataUrl);
 		expect(out.__file__).toMatchObject({ name: 'scan.png', url: pngDataUrl });
 	});
+
+	it('uses extra.serverPath without uploading again', async () => {
+		vi.mocked(ChatUploadsService.upload).mockClear();
+
+		const extras: DatabaseMessageExtra[] = [
+			{
+				base64Data: '',
+				content: '',
+				name: '19221.pdf',
+				parsedAs: 'none',
+				processedAsImages: false,
+				serverPath: '/data/inbox/19221.pdf',
+				type: AttachmentType.PDF
+			}
+		];
+		const out = await injectChatFilesIntoToolArgs({}, extras);
+
+		expect(out.path).toBe('/data/inbox/19221.pdf');
+		expect(ChatUploadsService.upload).not.toHaveBeenCalled();
+	});
 });
 
 describe('collectLastUserMessageExtras', () => {
@@ -127,6 +148,27 @@ describe('collectLastUserMessageExtras', () => {
 
 		expect(extras).toHaveLength(1);
 		expect(extras[0]).toMatchObject({ name: 'latest.pdf' });
+	});
+});
+
+describe('formatAttachedFilesForModel', () => {
+	it('lists names and server paths so the model does not ask for the file', async () => {
+		const files = await extrasToChatFiles([
+			{
+				base64Data: '',
+				content: '',
+				name: '19221.pdf',
+				parsedAs: 'none',
+				processedAsImages: false,
+				serverPath: '/tmp/llama-server-uploads/19221.pdf',
+				type: AttachmentType.PDF
+			}
+		]);
+		const text = formatAttachedFilesForModel(files);
+
+		expect(text).toContain('19221.pdf');
+		expect(text).toContain('/tmp/llama-server-uploads/19221.pdf');
+		expect(text).toContain('Do not ask the user');
 	});
 });
 

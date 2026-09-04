@@ -37,7 +37,7 @@ static std::string sanitize_filename(std::string name) {
     std::string out;
     out.reserve(name.size());
     for (unsigned char c : name) {
-        if (std::isalnum(c) || c == '.' || c == '-' || c == '_') {
+        if (std::isalnum(c) || c == '.' || c == '-' || c == '_' || c == ' ' || c == '(' || c == ')' || c == '+') {
             out.push_back((char) c);
         } else {
             out.push_back('_');
@@ -74,11 +74,11 @@ static std::string strip_data_url(const std::string & data) {
 }
 
 static bool valid_id(const std::string & id) {
-    if (id.empty() || id.size() > 64) {
+    if (id.empty() || id.size() > 255) {
         return false;
     }
     for (unsigned char c : id) {
-        if (!std::isalnum(c) && c != '-' && c != '_') {
+        if (c == '/' || c == '\\' || c == '\0') {
             return false;
         }
     }
@@ -121,28 +121,6 @@ static bool dir_is_writable(const fs::path & p) {
 #endif
 }
 
-static json read_meta(const fs::path & meta_path) {
-    std::ifstream in(meta_path);
-    if (!in) {
-        return json();
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    try {
-        return json::parse(ss.str());
-    } catch (...) {
-        return json();
-    }
-}
-
-std::string server_uploads::new_id() {
-    static thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_int_distribution<uint64_t> dist;
-    std::ostringstream ss;
-    ss << std::hex << dist(rng) << dist(rng);
-    return ss.str();
-}
-
 void server_uploads::ensure_default_dir() {
     if (default_dir.empty()) {
         default_dir = (fs::temp_directory_path() / "llama-server-uploads").string();
@@ -150,44 +128,33 @@ void server_uploads::ensure_default_dir() {
     fs::create_directories(default_dir);
 }
 
-void server_uploads::prune_dir(const std::string & dir) {
+void server_uploads::prune_dir(const std::string & dir, int ttl_hours) {
+    if (ttl_hours <= 0) {
+        return;
+    }
+
     std::error_code ec;
     if (!fs::exists(dir, ec) || ec) {
         return;
     }
 
-    const auto now = std::chrono::system_clock::now();
+    const auto now = fs::file_time_type::clock::now();
+    const auto max_age = std::chrono::seconds((int64_t) ttl_hours * 3600);
 
     for (const auto & p : fs::directory_iterator(dir, ec)) {
         if (ec || !p.is_regular_file()) {
             continue;
         }
         const auto path = p.path();
-        if (path.extension() != ".json") {
+        const auto mtime = fs::last_write_time(path, ec);
+        if (ec) {
             continue;
         }
-        json meta = read_meta(path);
-        if (meta.is_null() || !meta.contains("ttl_hours") || !meta.contains("created")) {
+        if (now - mtime < max_age) {
             continue;
-        }
-        const int ttl = json_value(meta, "ttl_hours", default_ttl_hours);
-        if (ttl <= 0) {
-            continue;
-        }
-        const int64_t created = json_value(meta, "created", (int64_t) 0);
-        const auto created_tp = std::chrono::system_clock::from_time_t((time_t) created);
-        if (now - created_tp < std::chrono::hours(ttl)) {
-            continue;
-        }
-        const std::string file_path = json_value(meta, "path", std::string());
-        if (!file_path.empty()) {
-            fs::remove(file_path, ec);
         }
         fs::remove(path, ec);
-        const std::string id = json_value(meta, "id", std::string());
-        if (!id.empty()) {
-            files.erase(id);
-        }
+        files.erase(path.filename().string());
     }
 }
 
@@ -258,12 +225,11 @@ server_uploads::server_uploads() {
 
             std::string id;
             std::string path;
-            const auto created = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
             {
                 std::lock_guard<std::mutex> lock(mutex);
-                prune_dir(dest_dir);
-                id = new_id();
-                path = (fs::path(dest_dir) / (id + "_" + sanitize_filename(name))).string();
+                prune_dir(dest_dir, ttl_hours);
+                id = sanitize_filename(name);
+                path = (fs::path(dest_dir) / id).string();
                 files[id] = entry{path, name, mime_type, bytes.size(), ttl_hours};
             }
 
@@ -273,18 +239,6 @@ server_uploads::server_uploads() {
             }
             out.write(reinterpret_cast<const char *>(bytes.data()), (std::streamsize) bytes.size());
             out.close();
-
-            const fs::path meta_path = fs::path(dest_dir) / (id + ".json");
-            std::ofstream meta(meta_path);
-            meta << safe_json_to_str({
-                {"id",        id},
-                {"name",      name},
-                {"path",      path},
-                {"mime_type", mime_type},
-                {"size",      (int64_t) bytes.size()},
-                {"ttl_hours", ttl_hours},
-                {"created",   (int64_t) created},
-            });
 
             SRV_INF("upload %s -> %s (%zu bytes, ttl=%d h)\n", name.c_str(), path.c_str(), bytes.size(), ttl_hours);
 
@@ -316,13 +270,11 @@ server_uploads::server_uploads() {
             }
 
             std::string path;
-            std::string meta_path;
             {
                 std::lock_guard<std::mutex> lock(mutex);
                 auto it = files.find(id);
                 if (it != files.end()) {
                     path = it->second.path;
-                    meta_path = (fs::path(path).parent_path() / (id + ".json")).string();
                     files.erase(it);
                 }
             }
@@ -335,9 +287,6 @@ server_uploads::server_uploads() {
 
             std::error_code ec;
             fs::remove(path, ec);
-            if (!meta_path.empty()) {
-                fs::remove(meta_path, ec);
-            }
             res->data = safe_json_to_str({{"ok", true}, {"id", id}});
         } catch (const std::invalid_argument & e) {
             res->status = 400;
@@ -354,6 +303,11 @@ server_uploads::server_uploads() {
         try {
             ensure_default_dir();
             const std::string requested = req.get_param("path");
+            int list_ttl = default_ttl_hours;
+            const std::string ttl_s = req.get_param("ttl_hours");
+            if (!ttl_s.empty()) {
+                list_ttl = std::atoi(ttl_s.c_str());
+            }
 
             json entries = json::array();
             std::string current;
@@ -413,9 +367,15 @@ server_uploads::server_uploads() {
             }
 
             json files_json = json::array();
-            if (!current.empty() && writable) {
+            const std::string files_dir = current.empty() ? default_dir : current;
+            const bool files_writable = current.empty() ? dir_is_writable(files_dir) : writable;
+            if (!files_dir.empty() && files_writable) {
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    prune_dir(files_dir, list_ttl);
+                }
                 std::error_code fec;
-                for (const auto & p : fs::directory_iterator(current, fec)) {
+                for (const auto & p : fs::directory_iterator(files_dir, fec)) {
                     if (fec || !p.is_regular_file()) {
                         continue;
                     }
@@ -518,21 +478,9 @@ server_uploads::server_uploads() {
                         throw std::runtime_error(ec.message());
                     }
 
-                    const std::string fname = file.filename().string();
-                    const auto us = fname.find('_');
-                    std::string maybe_id;
-                    if (us != std::string::npos) {
-                        maybe_id = fname.substr(0, us);
-                    } else if (file.extension() == ".json") {
-                        maybe_id = file.stem().string();
-                    }
-                    if (valid_id(maybe_id)) {
-                        const fs::path meta = file.parent_path() / (maybe_id + ".json");
-                        if (meta != file) {
-                            fs::remove(meta, ec);
-                        }
+                    {
                         std::lock_guard<std::mutex> lock(mutex);
-                        files.erase(maybe_id);
+                        files.erase(file.filename().string());
                     }
 
                     deleted.push_back(file.string());

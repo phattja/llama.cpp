@@ -260,7 +260,7 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 			},
 			{
 				defaultValue: 24,
-				help: 'Hours to keep uploaded attachment files on the server. 0 means never delete them.',
+				help: 'Hours to keep files in the attachment folder, based on each file\'s last-modified time. 0 means never delete them.',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.ATTACHMENT_KEEP_HOURS,
 				label: 'Keep attachments on server (hours)',

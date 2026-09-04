@@ -35,6 +35,5 @@ private:
     std::string default_dir;
 
     void ensure_default_dir();
-    void prune_dir(const std::string & dir);
-    std::string new_id();
+    void prune_dir(const std::string & dir, int ttl_hours);
 };
