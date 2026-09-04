@@ -15,6 +15,7 @@ struct server_uploads {
 
     server_http_context::handler_t handle_post;
     server_http_context::handler_t handle_delete;
+    server_http_context::handler_t handle_delete_files;
     server_http_context::handler_t handle_list_dirs;
     server_http_context::handler_t handle_mkdir;
 

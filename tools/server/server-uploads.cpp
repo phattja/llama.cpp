@@ -412,11 +412,29 @@ server_uploads::server_uploads() {
                 }
             }
 
+            json files_json = json::array();
+            if (!current.empty() && writable) {
+                std::error_code fec;
+                for (const auto & p : fs::directory_iterator(current, fec)) {
+                    if (fec || !p.is_regular_file()) {
+                        continue;
+                    }
+                    std::error_code sz_ec;
+                    const auto sz = fs::file_size(p.path(), sz_ec);
+                    files_json.push_back(json{
+                        {"name", p.path().filename().string()},
+                        {"path", weakly_abs(p.path().string()).string()},
+                        {"size", sz_ec ? (int64_t) 0 : (int64_t) sz},
+                    });
+                }
+            }
+
             res->data = safe_json_to_str({
                 {"path",     current},
                 {"parent",   parent},
                 {"writable", writable},
                 {"entries",  entries},
+                {"files",    files_json},
             });
         } catch (const std::invalid_argument & e) {
             res->status = 400;
@@ -457,6 +475,75 @@ server_uploads::server_uploads() {
             res->data = safe_json_to_str({
                 {"path",     dest.string()},
                 {"writable", true},
+            });
+        } catch (const std::invalid_argument & e) {
+            res->status = 400;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+        } catch (const std::exception & e) {
+            res->status = 500;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_SERVER));
+        }
+        return res;
+    };
+
+    handle_delete_files = [this](const server_http_req & req) -> server_http_res_ptr {
+        auto res = std::make_unique<server_http_res>();
+        try {
+            json body = json::parse(req.body.empty() ? "{}" : req.body);
+            json paths = body.contains("paths") && body["paths"].is_array() ? body["paths"] : json::array();
+            if (paths.empty()) {
+                throw std::invalid_argument("missing paths");
+            }
+
+            json deleted = json::array();
+            json failed  = json::array();
+
+            for (const auto & item : paths) {
+                const std::string raw = item.is_string() ? item.get<std::string>() : std::string();
+                if (raw.empty()) {
+                    continue;
+                }
+                try {
+                    const fs::path file = weakly_abs(raw);
+                    std::error_code ec;
+                    if (!fs::is_regular_file(file, ec) || ec) {
+                        throw std::invalid_argument("not a file");
+                    }
+                    if (!dir_is_writable(file.parent_path())) {
+                        throw std::invalid_argument("directory is not writable");
+                    }
+
+                    fs::remove(file, ec);
+                    if (ec) {
+                        throw std::runtime_error(ec.message());
+                    }
+
+                    const std::string fname = file.filename().string();
+                    const auto us = fname.find('_');
+                    std::string maybe_id;
+                    if (us != std::string::npos) {
+                        maybe_id = fname.substr(0, us);
+                    } else if (file.extension() == ".json") {
+                        maybe_id = file.stem().string();
+                    }
+                    if (valid_id(maybe_id)) {
+                        const fs::path meta = file.parent_path() / (maybe_id + ".json");
+                        if (meta != file) {
+                            fs::remove(meta, ec);
+                        }
+                        std::lock_guard<std::mutex> lock(mutex);
+                        files.erase(maybe_id);
+                    }
+
+                    deleted.push_back(file.string());
+                } catch (const std::exception & e) {
+                    failed.push_back({{"path", raw}, {"error", e.what()}});
+                }
+            }
+
+            res->data = safe_json_to_str({
+                {"deleted", deleted},
+                {"failed",  failed},
             });
         } catch (const std::invalid_argument & e) {
             res->status = 400;

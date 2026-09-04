@@ -214,7 +214,15 @@ Max file size is 1 GiB.
 
 **GET /uploads/dirs?path=**
 
-List writable directories the server can use for attachments. Empty `path` returns roots (cwd, temp, home if writable). Otherwise lists writable subfolders of `path`.
+List writable directories the server can use for attachments. Empty `path` returns roots (cwd, temp, home if writable). Otherwise lists writable subfolders of `path` and regular files in that folder (`files`).
+
+**POST /uploads/files/delete**
+
+Delete regular files in a writable directory:
+
+```json
+{ "paths": ["/writable/folder/file.pdf"] }
+```
 
 **POST /uploads/dirs**
 
