@@ -202,7 +202,7 @@ Response:
 { "id": "...", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/...", "mime_type": "application/pdf", "size": 1234 }
 ```
 
-Files live under the process temp dir (`llama-server-uploads`), max 64 MiB, and are pruned after 24 hours.
+Files live under the process temp dir (`llama-server-uploads`), max 1 GiB, and are pruned after 24 hours.
 
 **DELETE /uploads/:id**
 

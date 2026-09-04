@@ -124,6 +124,8 @@ bool server_http_context::init(const common_params & params) {
 #endif
 
     srv->set_default_headers({{"Server", "llama.cpp"}});
+    // JSON base64 uploads are ~4/3 the decoded size; allow 2 GiB so a 1 GiB file fits.
+    srv->set_payload_max_length(2ull * 1024ull * 1024ull * 1024ull);
     // srv->set_logger(log_server_request); // TODO @ngxson : this is too spamy, no very useful; improve it in the future
     srv->set_exception_handler([](const httplib::Request &, httplib::Response & res, const std::exception_ptr & ep) {
         // this is fail-safe; exceptions should already handled by `ex_wrapper`
