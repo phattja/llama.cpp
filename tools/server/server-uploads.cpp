@@ -24,6 +24,39 @@
 
 namespace fs = std::filesystem;
 
+// Build a filesystem path from a UTF-8 string (Thai and other Unicode names).
+static fs::path utf8_path(const std::string & s) {
+#if defined(_WIN32)
+    return fs::u8path(s);
+#else
+    return fs::path(s);
+#endif
+}
+
+static std::string path_to_utf8(const fs::path & p) {
+#if defined(_WIN32)
+    const auto u8 = p.u8string();
+    return std::string(u8.begin(), u8.end());
+#else
+    return p.string();
+#endif
+}
+
+static void utf8_clip_bytes(std::string & s, size_t max_bytes) {
+    if (s.size() <= max_bytes) {
+        return;
+    }
+
+    s.resize(max_bytes);
+    while (!s.empty() && ((unsigned char) s.back() & 0xC0) == 0x80) {
+        s.pop_back();
+    }
+    if (!s.empty() && (unsigned char) s.back() >= 0xC0) {
+        s.pop_back();
+    }
+}
+
+// Keep UTF-8 (including Thai). Drop path separators and ASCII control chars only.
 static std::string sanitize_filename(std::string name) {
     if (name.empty()) {
         return "file";
@@ -37,19 +70,21 @@ static std::string sanitize_filename(std::string name) {
     std::string out;
     out.reserve(name.size());
     for (unsigned char c : name) {
-        if (std::isalnum(c) || c == '.' || c == '-' || c == '_' || c == ' ' || c == '(' || c == ')' || c == '+') {
-            out.push_back((char) c);
-        } else {
-            out.push_back('_');
+        if (c == '/' || c == '\\' || c == '\0' || c < 0x20 || c == 0x7F) {
+            continue;
         }
+        out.push_back((char) c);
     }
 
-    if (out.empty() || out[0] == '.') {
+    utf8_clip_bytes(out, 255);
+
+    if (out.empty() || out == "." || out == "..") {
+        return "file";
+    }
+
+    if (out[0] == '.') {
         out = "file_" + out;
-    }
-
-    if (out.size() > 80) {
-        out.resize(80);
+        utf8_clip_bytes(out, 255);
     }
 
     return out;
@@ -87,7 +122,7 @@ static bool valid_id(const std::string & id) {
 
 static fs::path weakly_abs(const std::string & path) {
     std::error_code ec;
-    fs::path p(path);
+    fs::path p = utf8_path(path);
     if (p.empty()) {
         throw std::invalid_argument("empty path");
     }
@@ -154,7 +189,7 @@ void server_uploads::prune_dir(const std::string & dir, int ttl_hours) {
             continue;
         }
         fs::remove(path, ec);
-        files.erase(path.filename().string());
+        files.erase(path_to_utf8(path.filename()));
     }
 }
 
@@ -201,7 +236,7 @@ server_uploads::server_uploads() {
 
             const std::string dir_opt = json_value(body, "dir", std::string());
             if (!dir_opt.empty()) {
-                dest_dir = weakly_abs(dir_opt).string();
+                dest_dir = path_to_utf8(weakly_abs(dir_opt));
             }
             ttl_hours = json_value(body, "ttl_hours", json_value(body, "ttlHours", ttl_hours));
             if (ttl_hours < 0) {
@@ -229,11 +264,11 @@ server_uploads::server_uploads() {
                 std::lock_guard<std::mutex> lock(mutex);
                 prune_dir(dest_dir, ttl_hours);
                 id = sanitize_filename(name);
-                path = (fs::path(dest_dir) / id).string();
+                path = path_to_utf8(utf8_path(dest_dir) / utf8_path(id));
                 files[id] = entry{path, name, mime_type, bytes.size(), ttl_hours};
             }
 
-            std::ofstream out(path, std::ios::binary);
+            std::ofstream out(utf8_path(path), std::ios::binary);
             if (!out) {
                 throw std::runtime_error("failed to write upload");
             }
@@ -322,9 +357,9 @@ server_uploads::server_uploads() {
                     if (!fs::is_directory(p, ec) || ec || !dir_is_writable(p)) {
                         return;
                     }
-                    const std::string abs = weakly_abs(p.string()).string();
+                    const std::string abs = path_to_utf8(weakly_abs(path_to_utf8(p)));
                     entries.push_back(json{
-                        {"name", p.filename().string().empty() ? abs : p.filename().string()},
+                        {"name", path_to_utf8(p.filename()).empty() ? abs : path_to_utf8(p.filename())},
                         {"path", abs},
                         {"writable", true},
                     });
@@ -345,10 +380,10 @@ server_uploads::server_uploads() {
                 if (!fs::is_directory(cur)) {
                     throw std::invalid_argument("not a directory");
                 }
-                current = cur.string();
+                current = path_to_utf8(cur);
                 writable = dir_is_writable(cur);
                 if (cur.has_parent_path() && cur.parent_path() != cur) {
-                    parent = cur.parent_path().string();
+                    parent = path_to_utf8(cur.parent_path());
                 }
                 std::error_code ec;
                 for (const auto & p : fs::directory_iterator(cur, ec)) {
@@ -359,8 +394,8 @@ server_uploads::server_uploads() {
                         continue;
                     }
                     entries.push_back(json{
-                        {"name", p.path().filename().string()},
-                        {"path", weakly_abs(p.path().string()).string()},
+                        {"name", path_to_utf8(p.path().filename())},
+                        {"path", path_to_utf8(p.path())},
                         {"writable", true},
                     });
                 }
@@ -382,8 +417,8 @@ server_uploads::server_uploads() {
                     std::error_code sz_ec;
                     const auto sz = fs::file_size(p.path(), sz_ec);
                     files_json.push_back(json{
-                        {"name", p.path().filename().string()},
-                        {"path", weakly_abs(p.path().string()).string()},
+                        {"name", path_to_utf8(p.path().filename())},
+                        {"path", path_to_utf8(p.path())},
                         {"size", sz_ec ? (int64_t) 0 : (int64_t) sz},
                     });
                 }
@@ -420,7 +455,7 @@ server_uploads::server_uploads() {
                 if (parent.empty()) {
                     throw std::invalid_argument("missing parent");
                 }
-                dest = weakly_abs(parent) / name;
+                dest = weakly_abs(parent) / utf8_path(name);
             }
 
             const fs::path parent = dest.parent_path();
@@ -433,7 +468,7 @@ server_uploads::server_uploads() {
             }
 
             res->data = safe_json_to_str({
-                {"path",     dest.string()},
+                {"path",     path_to_utf8(dest)},
                 {"writable", true},
             });
         } catch (const std::invalid_argument & e) {
@@ -480,10 +515,10 @@ server_uploads::server_uploads() {
 
                     {
                         std::lock_guard<std::mutex> lock(mutex);
-                        files.erase(file.filename().string());
+                        files.erase(path_to_utf8(file.filename()));
                     }
 
-                    deleted.push_back(file.string());
+                    deleted.push_back(path_to_utf8(file));
                 } catch (const std::exception & e) {
                     failed.push_back({{"path", raw}, {"error", e.what()}});
                 }
