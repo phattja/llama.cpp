@@ -75,12 +75,42 @@ export function useChatScreenFileUpload(options: UseChatScreenFileUploadOptions)
 		}
 
 		if (supportedFiles.length > 0) {
-			const processed = await processFilesToChatUploaded(
-				supportedFiles,
-				options.activeModelId() ?? undefined
-			);
+			const pending: ChatUploadedFile[] = supportedFiles.map((file) => ({
+				file,
+				id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+				isLoading: true,
+				name: file.name,
+				size: file.size,
+				type: file.type
+			}));
 
-			uploadedFiles = [...uploadedFiles, ...processed];
+			uploadedFiles = [...uploadedFiles, ...pending];
+
+			for (const item of pending) {
+				try {
+					const processed = await processFilesToChatUploaded(
+						[item.file],
+						options.activeModelId() ?? undefined
+					);
+					const done = processed[0];
+
+					uploadedFiles = uploadedFiles.map((file) =>
+						file.id === item.id
+							? { ...(done ?? item), id: item.id, isLoading: false }
+							: file
+					);
+				} catch (error) {
+					uploadedFiles = uploadedFiles.map((file) =>
+						file.id === item.id
+							? {
+									...file,
+									isLoading: false,
+									loadError: error instanceof Error ? error.message : 'Failed to add file'
+								}
+							: file
+					);
+				}
+			}
 		}
 	}
 

@@ -25,6 +25,8 @@
 		readonly?: boolean;
 		size?: number;
 		textContent?: string;
+		isLoading?: boolean;
+		loadError?: string;
 		// Either uploaded file or stored attachment
 		uploadedFile?: ChatUploadedFile;
 	}
@@ -33,6 +35,8 @@
 		attachment,
 		class: className = '',
 		id,
+		isLoading = false,
+		loadError,
 		name,
 		onclick,
 		onRemove,
@@ -119,6 +123,24 @@
 	</div>
 {/snippet}
 
+{#snippet fileName()}
+	<span class="flex min-w-0 items-center gap-1.5">
+		{#if isLoading}
+			<span
+				aria-label="Adding file"
+				class="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary"
+				title="Adding file…"
+			></span>
+		{:else if loadError}
+			<span
+				class="inline-block h-3 w-3 shrink-0 rounded-full bg-destructive"
+				title={loadError}
+			></span>
+		{/if}
+		<span class="truncate">{name}</span>
+	</span>
+{/snippet}
+
 {#snippet info(text: string | undefined)}
 	{#if text}
 		<span class="text-xs text-muted-foreground">{text}</span>
@@ -142,7 +164,7 @@
 			{#if readonly}
 				<div class="flex items-start gap-3">
 					<div class="flex min-w-0 flex-1 flex-col items-start text-left">
-						<span class="w-full truncate text-sm font-medium text-foreground">{name}</span>
+						<span class="flex w-full min-w-0 text-sm font-medium text-foreground">{@render fileName()}</span>
 
 						{@render info(pdfProcessingMode || (size ? formatFileSize(size) : undefined))}
 
@@ -152,7 +174,7 @@
 					</div>
 				</div>
 			{:else}
-				<span class="mb-3 block truncate text-sm font-medium text-foreground">{name}</span>
+				<span class="mb-3 flex min-w-0 text-sm font-medium text-foreground">{@render fileName()}</span>
 
 				{#if textContent}
 					{@render textPreview(textContent)}
@@ -170,11 +192,11 @@
 
 		<div class="flex flex-col items-start gap-0.5">
 			<span
-				class="max-w-24 truncate text-sm font-medium text-foreground {readonly
+				class="flex max-w-24 min-w-0 text-sm font-medium text-foreground {readonly
 					? ''
 					: 'group-hover:pr-6'} md:max-w-32"
 			>
-				{name}
+				{@render fileName()}
 			</span>
 
 			{@render info(pdfProcessingMode || (size ? formatFileSize(size) : undefined))}

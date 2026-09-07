@@ -6,6 +6,7 @@
 	import { getChatMessageEditContext } from '$lib/contexts';
 	import { KeyboardKey, MessageRole } from '$lib/enums';
 	import { chatStore } from '$lib/stores';
+	import type { ChatUploadedFile } from '$lib/types';
 	import { processFilesToChatUploaded } from '$lib/utils/browser-only';
 
 	const editCtx = getChatMessageEditContext();
@@ -84,9 +85,41 @@
 	}
 
 	async function handleFilesAdd(files: File[]) {
-		const processed = await processFilesToChatUploaded(files);
+		const pending: ChatUploadedFile[] = files.map((file) => ({
+			file,
+			id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+			isLoading: true,
+			name: file.name,
+			size: file.size,
+			type: file.type
+		}));
 
-		editCtx.setUploadedFiles([...editCtx.editedUploadedFiles, ...processed]);
+		editCtx.setUploadedFiles([...editCtx.editedUploadedFiles, ...pending]);
+
+		for (const item of pending) {
+			try {
+				const processed = await processFilesToChatUploaded([item.file]);
+				const done = processed[0];
+
+				editCtx.setUploadedFiles(
+					editCtx.editedUploadedFiles.map((file) =>
+						file.id === item.id ? { ...(done ?? item), id: item.id, isLoading: false } : file
+					)
+				);
+			} catch (error) {
+				editCtx.setUploadedFiles(
+					editCtx.editedUploadedFiles.map((file) =>
+						file.id === item.id
+							? {
+									...file,
+									isLoading: false,
+									loadError: error instanceof Error ? error.message : 'Failed to add file'
+								}
+							: file
+					)
+				);
+			}
+		}
 	}
 
 	$effect(() => {

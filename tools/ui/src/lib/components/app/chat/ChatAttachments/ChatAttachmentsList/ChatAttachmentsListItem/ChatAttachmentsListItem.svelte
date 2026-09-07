@@ -108,6 +108,8 @@
 		attachment={item.attachment}
 		class="flex-shrink-0 cursor-pointer {className} {scrollClasses}"
 		id={item.id}
+		isLoading={item.isLoading}
+		loadError={item.loadError}
 		name={item.name}
 		onRemove={onFileRemove}
 		onclick={() => onPreview?.(item)}
@@ -121,6 +123,8 @@
 		attachment={item.attachment}
 		class="flex-shrink-0 cursor-pointer {className} {scrollClasses}"
 		id={item.id}
+		isLoading={item.isLoading}
+		loadError={item.loadError}
 		name={item.name}
 		onRemove={onFileRemove}
 		onclick={() => onPreview?.(item)}
