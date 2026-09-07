@@ -42,6 +42,33 @@ static server_http_res_ptr proxy_request(const server_http_req & req, std::strin
     SRV_INF("proxying %s request to %s://%s:%i%s\n", method.c_str(), parsed_url.scheme.c_str(), common_http_format_host(parsed_url.host).c_str(), parsed_url.port, parsed_url.path.c_str());
 
     std::map<std::string, std::string> headers;
+    auto header_ci = [&](const std::string & want) -> std::string {
+        for (const auto & [key, value] : req.headers) {
+            if (proxy_header_to_lower(key) == want) {
+                return value;
+            }
+        }
+        return {};
+    };
+    // Tell the target MCP where this llama-server's uploads can be fetched.
+    std::string upload_base = header_ci("origin");
+    if (upload_base.empty() || upload_base == "null") {
+        const std::string xfhost = header_ci("x-forwarded-host");
+        const std::string host = xfhost.empty() ? header_ci("host") : xfhost;
+        const std::string proto = [&]() {
+            const std::string xf = header_ci("x-forwarded-proto");
+            if (!xf.empty()) {
+                return xf;
+            }
+            return std::string("http");
+        }();
+        if (!host.empty()) {
+            upload_base = proto + "://" + host;
+        }
+    }
+    if (!upload_base.empty() && upload_base != "null") {
+        headers["X-Llama-Upload-Base"] = upload_base;
+    }
     const std::string proxy_header_prefix = "x-llama-server-proxy-header-";
     for (auto [key, value] : req.headers) {
         const std::string lowered_key = proxy_header_to_lower(key);

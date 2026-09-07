@@ -11,6 +11,8 @@
 #include <fstream>
 #include <random>
 #include <sstream>
+#include <iomanip>
+#include <memory>
 #include <filesystem>
 
 #if defined(_WIN32)
@@ -106,6 +108,53 @@ static std::string strip_data_url(const std::string & data) {
         return data.substr(comma + 1);
     }
     return data;
+}
+
+static std::string mime_from_name(const std::string & name) {
+    std::string ext;
+    const auto dot = name.find_last_of('.');
+    if (dot != std::string::npos) {
+        ext = name.substr(dot);
+        for (char & c : ext) {
+            c = (char) std::tolower((unsigned char) c);
+        }
+    }
+    if (ext == ".pdf")  return "application/pdf";
+    if (ext == ".png")  return "image/png";
+    if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+    if (ext == ".webp") return "image/webp";
+    if (ext == ".gif")  return "image/gif";
+    if (ext == ".tif" || ext == ".tiff") return "image/tiff";
+    if (ext == ".bmp")  return "image/bmp";
+    return "application/octet-stream";
+}
+
+static std::string pct_encode_utf8(const std::string & s) {
+    std::ostringstream out;
+    out << std::hex << std::uppercase;
+    for (unsigned char c : s) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            out << (char) c;
+        } else {
+            out << '%' << std::setw(2) << std::setfill('0') << int(c);
+        }
+    }
+    return out.str();
+}
+
+static bool path_under_dir(const fs::path & file, const fs::path & dir) {
+    std::error_code ec;
+    const auto a = fs::weakly_canonical(file, ec);
+    const auto b = fs::weakly_canonical(dir, ec);
+    if (ec) {
+        return false;
+    }
+    const auto as = path_to_utf8(a);
+    auto bs = path_to_utf8(b);
+    if (!bs.empty() && bs.back() != '/') {
+        bs.push_back('/');
+    }
+    return as.rfind(bs, 0) == 0;
 }
 
 static bool valid_id(const std::string & id) {
@@ -532,6 +581,118 @@ server_uploads::server_uploads() {
             res->status = 400;
             res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
         } catch (const std::exception & e) {
+            res->status = 500;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_SERVER));
+        }
+        return res;
+    };
+
+    handle_get = [this](const server_http_req & req) -> server_http_res_ptr {
+        auto res = std::make_unique<server_http_res>();
+        try {
+            ensure_default_dir();
+            std::string id = req.get_param("id");
+            if (id.empty()) {
+                id = req.get_param("name");
+            }
+            if (id.empty()) {
+                throw std::invalid_argument("missing name");
+            }
+            if (!valid_id(id)) {
+                throw std::invalid_argument("invalid upload id");
+            }
+
+            const std::string sanitized = sanitize_filename(id);
+            std::string path;
+            std::string mime_type = mime_from_name(id);
+            std::string original_name = id;
+
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                auto try_map = [&](const std::string & key) {
+                    auto it = files.find(key);
+                    if (it != files.end()) {
+                        path = it->second.path;
+                        if (!it->second.mime_type.empty()) {
+                            mime_type = it->second.mime_type;
+                        }
+                        if (!it->second.name.empty()) {
+                            original_name = it->second.name;
+                        }
+                    }
+                };
+                try_map(id);
+                if (path.empty() && sanitized != id) {
+                    try_map(sanitized);
+                }
+            }
+
+            auto try_disk = [&](const std::string & name) {
+                if (!path.empty()) {
+                    return;
+                }
+                const auto cand = utf8_path(default_dir) / utf8_path(name);
+                std::error_code ec;
+                if (fs::is_regular_file(cand, ec) && !ec) {
+                    path = path_to_utf8(cand);
+                }
+            };
+            try_disk(id);
+            try_disk(sanitized);
+
+            if (path.empty()) {
+                res->status = 404;
+                res->data   = safe_json_to_str(format_error_response("upload not found", ERROR_TYPE_NOT_FOUND));
+                return res;
+            }
+
+            const fs::path file = weakly_abs(path);
+            std::error_code ec;
+            if (!fs::is_regular_file(file, ec) || ec) {
+                res->status = 404;
+                res->data   = safe_json_to_str(format_error_response("upload not found", ERROR_TYPE_NOT_FOUND));
+                return res;
+            }
+            if (!path_under_dir(file, utf8_path(default_dir))) {
+                bool allowed = false;
+                std::lock_guard<std::mutex> lock(mutex);
+                for (const auto & [_, entry] : files) {
+                    if (entry.path == path) {
+                        allowed = true;
+                        break;
+                    }
+                }
+                if (!allowed) {
+                    throw std::invalid_argument("path is not in the upload directory");
+                }
+            }
+
+            auto ifs = std::make_shared<std::ifstream>(file, std::ios::binary);
+            if (!*ifs) {
+                throw std::runtime_error("failed to open upload");
+            }
+
+            res->content_type = mime_type;
+            res->headers["X-Filename-Star"] = "UTF-8''" + pct_encode_utf8(original_name);
+            res->headers["Content-Disposition"] =
+                "attachment; filename*=UTF-8''" + pct_encode_utf8(original_name);
+            res->next = [ifs](std::string & out) -> bool {
+                char buf[65536];
+                ifs->read(buf, sizeof(buf));
+                const auto n = ifs->gcount();
+                if (n <= 0) {
+                    out.clear();
+                    return false;
+                }
+                out.assign(buf, static_cast<size_t>(n));
+                return n == sizeof(buf);
+            };
+            SRV_INF("upload get %s -> %s\n", original_name.c_str(), path.c_str());
+        } catch (const std::invalid_argument & e) {
+            res->status = 400;
+            res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_INVALID_REQUEST));
+        } catch (const std::exception & e) {
+            SRV_ERR("upload get failed: %s\n", e.what());
             res->status = 500;
             res->data   = safe_json_to_str(format_error_response(e.what(), ERROR_TYPE_SERVER));
         }

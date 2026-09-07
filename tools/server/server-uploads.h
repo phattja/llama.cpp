@@ -14,6 +14,7 @@ struct server_uploads {
     static constexpr int default_ttl_hours = 24;
 
     server_http_context::handler_t handle_post;
+    server_http_context::handler_t handle_get;
     server_http_context::handler_t handle_delete;
     server_http_context::handler_t handle_delete_files;
     server_http_context::handler_t handle_list_dirs;
