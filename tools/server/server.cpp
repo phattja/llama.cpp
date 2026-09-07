@@ -336,12 +336,10 @@ int llama_server(common_params & params, int argc, char ** argv) {
     }
 
     ctx_http.post("/uploads",            ex_wrapper(uploads.handle_post));
+    ctx_http.del ("/uploads/:id",        ex_wrapper(uploads.handle_delete));
+    ctx_http.post("/uploads/files/delete", ex_wrapper(uploads.handle_delete_files));
     ctx_http.get ("/uploads/dirs",       ex_wrapper(uploads.handle_list_dirs));
     ctx_http.post("/uploads/dirs",       ex_wrapper(uploads.handle_mkdir));
-    ctx_http.post("/uploads/files/delete", ex_wrapper(uploads.handle_delete_files));
-    ctx_http.get ("/uploads/content",    ex_wrapper(uploads.handle_get));
-    ctx_http.get ("/uploads/:id",        ex_wrapper(uploads.handle_get));
-    ctx_http.del ("/uploads/:id",        ex_wrapper(uploads.handle_delete));
 
     if (params.ui_mcp_proxy) {
         ctx_http.get ("/cors-proxy",      ex_wrapper(proxy_handler_get));
