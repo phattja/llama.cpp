@@ -212,6 +212,10 @@ export class ChatService {
 		);
 
 		for (const image of imageFiles) {
+			if (!image.base64Url?.startsWith('data:')) {
+				continue;
+			}
+
 			const maxImageResolution = settingsStore.getConfig(SETTINGS_KEYS.MAX_IMAGE_RESOLUTION);
 			// Caps the resolution and bakes the jpeg exif orientation in one pass,
 			// untouched images pass through as is
@@ -229,6 +233,10 @@ export class ChatService {
 		);
 
 		for (const audio of audioFiles) {
+			if (!audio.base64Data) {
+				continue;
+			}
+
 			contentParts.push({
 				input_audio: {
 					data: audio.base64Data,
@@ -251,6 +259,10 @@ export class ChatService {
 		);
 
 		for (const video of videoFiles) {
+			if (!video.base64Data) {
+				continue;
+			}
+
 			contentParts.push({
 				input_video: {
 					data: video.base64Data,

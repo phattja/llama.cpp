@@ -6,7 +6,7 @@ import { AttachmentType, FileTypeCategory, SpecialFileType } from '$lib/enums';
 import { modelsStore } from '$lib/stores/models/index.svelte';
 import { settingsStore } from '$lib/stores/settings/index.svelte';
 import type { ChatUploadedFile, DatabaseMessageExtra, FileProcessingResult } from '$lib/types';
-import { getFileTypeCategory, getPdfParseMode } from '$lib/utils';
+import { getFileTypeCategory, getFileTypeCategoryByExtension, getPdfParseMode } from '$lib/utils';
 import { toast } from 'svelte-sonner';
 
 function withServerPath<T extends { serverPath?: string }>(extra: T, file: ChatUploadedFile): T {
@@ -18,7 +18,8 @@ function withServerPath<T extends { serverPath?: string }>(extra: T, file: ChatU
 }
 
 function extraFromServerPath(file: ChatUploadedFile): DatabaseMessageExtra {
-	const category = getFileTypeCategory(file.type);
+	const category =
+		getFileTypeCategory(file.type) ?? getFileTypeCategoryByExtension(file.name);
 
 	if (category === FileTypeCategory.IMAGE) {
 		return withServerPath(
@@ -110,7 +111,7 @@ export async function parseFilesToMessageExtras(
 	const emptyFiles: string[] = [];
 
 	for (const file of files) {
-		if (file.serverPath && file.file.size === 0 && file.type !== SpecialFileType.MCP_PROMPT) {
+		if (file.serverPath && file.type !== SpecialFileType.MCP_PROMPT) {
 			extras.push(extraFromServerPath(file));
 			continue;
 		}
