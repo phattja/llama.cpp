@@ -156,11 +156,32 @@ static bool dir_is_writable(const fs::path & p) {
 #endif
 }
 
+static int64_t file_mtime_unix(const fs::path & path) {
+    std::error_code ec;
+    const auto mtime = fs::last_write_time(path, ec);
+    if (ec) {
+        return 0;
+    }
+
+    const auto sys = std::chrono::system_clock::now() + (mtime - fs::file_time_type::clock::now());
+    return (int64_t) std::chrono::system_clock::to_time_t(
+        std::chrono::time_point_cast<std::chrono::system_clock::duration>(sys));
+}
+
 void server_uploads::ensure_default_dir() {
     if (default_dir.empty()) {
-        default_dir = (fs::temp_directory_path() / "llama-server-uploads").string();
+#ifdef _WIN32
+        const char * home = std::getenv("USERPROFILE");
+#else
+        const char * home = std::getenv("HOME");
+#endif
+        if (home && home[0]) {
+            default_dir = path_to_utf8(utf8_path(std::string(home)) / ".llama" / "uploads");
+        } else {
+            default_dir = path_to_utf8(fs::temp_directory_path() / "llama-uploads");
+        }
     }
-    fs::create_directories(default_dir);
+    fs::create_directories(utf8_path(default_dir));
 }
 
 void server_uploads::prune_dir(const std::string & dir, int ttl_hours) {
@@ -234,10 +255,6 @@ server_uploads::server_uploads() {
                 bytes.assign(decoded.begin(), decoded.end());
             }
 
-            const std::string dir_opt = json_value(body, "dir", std::string());
-            if (!dir_opt.empty()) {
-                dest_dir = path_to_utf8(weakly_abs(dir_opt));
-            }
             ttl_hours = json_value(body, "ttl_hours", json_value(body, "ttlHours", ttl_hours));
             if (ttl_hours < 0) {
                 throw std::invalid_argument("ttl_hours must be >= 0");
@@ -337,98 +354,40 @@ server_uploads::server_uploads() {
         auto res = std::make_unique<server_http_res>();
         try {
             ensure_default_dir();
-            const std::string requested = req.get_param("path");
             int list_ttl = default_ttl_hours;
             const std::string ttl_s = req.get_param("ttl_hours");
             if (!ttl_s.empty()) {
                 list_ttl = std::atoi(ttl_s.c_str());
             }
 
-            json entries = json::array();
-            std::string current;
-            std::string parent;
-            bool writable = false;
-
-            if (requested.empty()) {
-                current = "";
-                writable = false;
-                auto add_root = [&](const fs::path & p) {
-                    std::error_code ec;
-                    if (!fs::is_directory(p, ec) || ec || !dir_is_writable(p)) {
-                        return;
-                    }
-                    const std::string abs = path_to_utf8(weakly_abs(path_to_utf8(p)));
-                    entries.push_back(json{
-                        {"name", path_to_utf8(p.filename()).empty() ? abs : path_to_utf8(p.filename())},
-                        {"path", abs},
-                        {"writable", true},
-                    });
-                };
-                add_root(fs::current_path());
-                add_root(fs::temp_directory_path());
-                add_root(fs::path(default_dir));
-#ifdef _WIN32
-                const char * home = std::getenv("USERPROFILE");
-#else
-                const char * home = std::getenv("HOME");
-#endif
-                if (home && home[0]) {
-                    add_root(fs::path(home));
-                }
-            } else {
-                const fs::path cur = weakly_abs(requested);
-                if (!fs::is_directory(cur)) {
-                    throw std::invalid_argument("not a directory");
-                }
-                current = path_to_utf8(cur);
-                writable = dir_is_writable(cur);
-                if (cur.has_parent_path() && cur.parent_path() != cur) {
-                    parent = path_to_utf8(cur.parent_path());
-                }
-                std::error_code ec;
-                for (const auto & p : fs::directory_iterator(cur, ec)) {
-                    if (ec || !p.is_directory()) {
-                        continue;
-                    }
-                    if (!dir_is_writable(p.path())) {
-                        continue;
-                    }
-                    entries.push_back(json{
-                        {"name", path_to_utf8(p.path().filename())},
-                        {"path", path_to_utf8(p.path())},
-                        {"writable", true},
-                    });
-                }
-            }
-
             json files_json = json::array();
-            const std::string files_dir = current.empty() ? default_dir : current;
-            const bool files_writable = current.empty() ? dir_is_writable(files_dir) : writable;
-            if (!files_dir.empty() && files_writable) {
+            const bool writable = dir_is_writable(utf8_path(default_dir));
+            if (writable) {
                 {
                     std::lock_guard<std::mutex> lock(mutex);
-                    prune_dir(files_dir, list_ttl);
+                    prune_dir(default_dir, list_ttl);
                 }
                 std::error_code fec;
-                for (const auto & p : fs::directory_iterator(files_dir, fec)) {
+                for (const auto & p : fs::directory_iterator(utf8_path(default_dir), fec)) {
                     if (fec || !p.is_regular_file()) {
                         continue;
                     }
                     std::error_code sz_ec;
                     const auto sz = fs::file_size(p.path(), sz_ec);
                     files_json.push_back(json{
-                        {"name", path_to_utf8(p.path().filename())},
-                        {"path", path_to_utf8(p.path())},
-                        {"size", sz_ec ? (int64_t) 0 : (int64_t) sz},
+                        {"name",  path_to_utf8(p.path().filename())},
+                        {"path",  path_to_utf8(p.path())},
+                        {"size",  sz_ec ? (int64_t) 0 : (int64_t) sz},
+                        {"mtime", file_mtime_unix(p.path())},
                     });
                 }
             }
 
             res->data = safe_json_to_str({
-                {"path",     current},
-                {"parent",   parent},
+                {"path",     default_dir},
+                {"parent",   ""},
                 {"writable", writable},
-                {"entries",  entries},
+                {"entries",  json::array()},
                 {"files",    files_json},
             });
         } catch (const std::invalid_argument & e) {
@@ -484,12 +443,14 @@ server_uploads::server_uploads() {
     handle_delete_files = [this](const server_http_req & req) -> server_http_res_ptr {
         auto res = std::make_unique<server_http_res>();
         try {
+            ensure_default_dir();
             json body = json::parse(req.body.empty() ? "{}" : req.body);
             json paths = body.contains("paths") && body["paths"].is_array() ? body["paths"] : json::array();
             if (paths.empty()) {
                 throw std::invalid_argument("missing paths");
             }
 
+            const std::string allowed = path_to_utf8(weakly_abs(default_dir));
             json deleted = json::array();
             json failed  = json::array();
 
@@ -503,6 +464,9 @@ server_uploads::server_uploads() {
                     std::error_code ec;
                     if (!fs::is_regular_file(file, ec) || ec) {
                         throw std::invalid_argument("not a file");
+                    }
+                    if (path_to_utf8(file.parent_path()) != allowed) {
+                        throw std::invalid_argument("file is outside the attachment folder");
                     }
                     if (!dir_is_writable(file.parent_path())) {
                         throw std::invalid_argument("directory is not writable");

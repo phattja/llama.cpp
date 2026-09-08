@@ -7,11 +7,11 @@
 #include <unordered_map>
 
 // Chat-attachment store for MCP / server tools.
-// Default location is the process temp dir; the client may pick any
-// writable directory. ttl_hours == 0 means the file is never pruned.
+// Files live in ~/.llama/uploads (created if missing). ttl_hours == 0
+// means the file is never pruned.
 struct server_uploads {
     static constexpr size_t max_bytes = 1024ull * 1024ull * 1024ull; // 1 GiB
-    static constexpr int default_ttl_hours = 24;
+    static constexpr int default_ttl_hours = 0;
 
     server_http_context::handler_t handle_post;
     server_http_context::handler_t handle_delete;

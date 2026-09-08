@@ -195,34 +195,33 @@ Request body (JSON):
   "name": "doc.pdf",
   "mime_type": "application/pdf",
   "data": "<base64>",
-  "dir": "/optional/writable/folder",
-  "ttl_hours": 24
+  "ttl_hours": 0
 }
 ```
 
 `data` may be a raw base64 string or a `data:` URL. Multipart form uploads are also accepted.
-`dir` defaults to `$TMPDIR/llama-server-uploads`. The directory must be writable by the server.
+Files are always stored in `~/.llama/uploads` (created if missing). The folder cannot be changed from the Web UI.
 The file is stored under its original name, including UTF-8 / Thai characters. Only path separators and control characters are stripped. Existing files with the same name are overwritten.
-`ttl_hours` is how long files in that folder are kept (default 24), measured from each file's last-write timestamp. `0` means never prune. There is no sidecar metadata file.
+`ttl_hours` is how long files in that folder are kept (default 0 = never prune), measured from each file's last-write timestamp. There is no sidecar metadata file.
 
 Response:
 
 ```json
-{ "id": "doc.pdf", "name": "doc.pdf", "path": "/tmp/llama-server-uploads/doc.pdf", "mime_type": "application/pdf", "size": 1234, "ttl_hours": 24 }
+{ "id": "doc.pdf", "name": "doc.pdf", "path": "/home/user/.llama/uploads/doc.pdf", "mime_type": "application/pdf", "size": 1234, "ttl_hours": 0 }
 ```
 
 Max file size is 1 GiB.
 
-**GET /uploads/dirs?path=**
+**GET /uploads/dirs**
 
-List writable directories the server can use for attachments. Empty `path` returns roots (cwd, temp, home if writable). Otherwise lists writable subfolders of `path` and regular files in that folder (`files`).
+List regular files in `~/.llama/uploads` (`name`, `path`, `size`, `mtime`).
 
 **POST /uploads/files/delete**
 
-Delete regular files in a writable directory:
+Delete regular files in `~/.llama/uploads` only:
 
 ```json
-{ "paths": ["/writable/folder/file.pdf"] }
+{ "paths": ["/home/user/.llama/uploads/file.pdf"] }
 ```
 
 **POST /uploads/dirs**

@@ -251,16 +251,16 @@ export const SETTINGS_REGISTRY: SettingsSectionEntry[] = [
 				type: SettingsFieldType.CHECKBOX
 			},
 			{
-				defaultValue: '',
-				help: 'Folder on this llama-server host where attachments are stored for tool calls. Empty uses the server temp directory. Browse lists only directories the server can write.',
+				defaultValue: '~/.llama/uploads',
+				help: 'Fixed folder on this llama-server host (~/.llama/uploads, created if missing). Browse only to delete files; the folder cannot be changed.',
 				key: SETTINGS_KEYS.ATTACHMENT_SERVER_DIR,
 				label: 'Attachment folder on server',
-				placeholder: 'Server default (temp)',
+				placeholder: '~/.llama/uploads',
 				type: SettingsFieldType.INPUT
 			},
 			{
-				defaultValue: 24,
-				help: 'Hours to keep files in the attachment folder, based on each file\'s last-modified time. 0 means never delete them.',
+				defaultValue: 0,
+				help: 'Hours to keep files in ~/.llama/uploads, based on each file\'s last-modified time. 0 means never delete them (default).',
 				isPositiveInteger: true,
 				key: SETTINGS_KEYS.ATTACHMENT_KEEP_HOURS,
 				label: 'Keep attachments on server (hours)',

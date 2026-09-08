@@ -86,6 +86,7 @@
 					<Input
 						autocomplete={field.isPrivate ? 'new-password' : undefined}
 						id={field.key}
+						readonly={field.key === SETTINGS_KEYS.ATTACHMENT_SERVER_DIR}
 						type={field.isPrivate ? 'password' : field.isPositiveInteger ? 'number' : 'text'}
 						{...field.isPositiveInteger
 							? {
@@ -95,11 +96,19 @@
 								}
 							: {}}
 						class="w-full {isCustomRealTime ? 'pr-8' : ''}"
-						oninput={(e) => onConfigChange(field.key, e.currentTarget.value)}
+						oninput={(e) => {
+							if (field.key === SETTINGS_KEYS.ATTACHMENT_SERVER_DIR) {
+								return;
+							}
+
+							onConfigChange(field.key, e.currentTarget.value);
+						}}
 						placeholder={currentModelParams[field.key] != null
 							? `Default: ${normalizeFloatingPoint(currentModelParams[field.key])}`
 							: (field.placeholder ?? '')}
-						value={currentValue}
+						value={field.key === SETTINGS_KEYS.ATTACHMENT_SERVER_DIR
+							? '~/.llama/uploads'
+							: currentValue}
 					/>
 
 					{#if field.key === SETTINGS_KEYS.ATTACHMENT_SERVER_DIR}
@@ -111,11 +120,7 @@
 							<FolderSearch class="h-4 w-4" />
 							Browse
 						</button>
-						<SettingsServerDirBrowse
-							bind:open={dirBrowseOpen}
-							onSelect={(path) => onConfigChange(field.key, path)}
-							startPath={currentValue}
-						/>
+						<SettingsServerDirBrowse bind:open={dirBrowseOpen} />
 					{/if}
 
 					{#if isCustomRealTime}
